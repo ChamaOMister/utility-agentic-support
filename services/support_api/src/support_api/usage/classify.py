@@ -13,11 +13,17 @@ Rules worth knowing:
   A bare ``openai.APIConnectionError`` with no such cause, a read/write timeout, an interrupted
   read, ``asyncio.TimeoutError`` and anything unrecognised are ``UNKNOWN``.
 * The pinned ``openai`` SDK wraps ``httpx2`` errors (``APIConnectionError`` / ``APITimeoutError``
-  with ``__cause__`` set), while code and tests that inject a legacy ``httpx.AsyncClient`` raise
-  ``httpx`` errors. Both libraries' classes are matched; each import is defensive.
-* The exception chain is walked over ``__cause__`` and ``__context__`` with a cycle guard, and the
-  *outermost* recognised error decides. A ``ReadTimeout`` raised after an earlier, handled
-  ``ConnectError`` therefore stays ``UNKNOWN``: by then a request may have been sent.
+  with ``__cause__`` set; real chain: ``APIConnectionError`` -> ``httpx2.ConnectError`` ->
+  ``httpcore2.ConnectError`` -> ``ConnectionRefusedError``), while code and tests that inject a
+  legacy ``httpx.AsyncClient`` raise ``httpx`` errors. The not-sent types of ``httpx``, ``httpx2``,
+  ``httpcore`` and ``httpcore2`` are all matched; each optional import is defensive.
+* The chain is followed ONLY through ``openai.APIConnectionError`` (incl. ``APITimeoutError``),
+  stepping to ``__cause__`` or, absent that, ``__context__``, with a cycle guard. The first
+  non-wrapper decides: a not-sent type -> ``CONNECT_FAILED``; anything else -> ``UNKNOWN``. An
+  unrecognised exception (``ValueError``, ``ssl.SSLError``, ``ConnectionResetError``,
+  ``JSONDecodeError``, ``APIResponseValidationError``...) is never looked through: a
+  ``ConnectError`` in its ``__context__`` does not release, because a later request may have been
+  sent. Likewise a ``ReadTimeout`` or ``asyncio.TimeoutError`` over an old ``ConnectError``.
 * A ``Retry-After`` HTTP-date is treated as non-numeric (delay 1.0 s); only delta-seconds are read.
 """
 
@@ -27,12 +33,18 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
 
+import httpcore
 import httpx
+import openai
 
-try:  # the pinned openai SDK uses httpx2 internally
+try:  # the pinned openai SDK uses httpx2 (and httpcore2 beneath it) internally
     import httpx2
 except ImportError:  # pragma: no cover - depends on the installed openai version
     httpx2 = None  # type: ignore[assignment]
+try:
+    import httpcore2
+except ImportError:  # pragma: no cover - depends on the installed openai version
+    httpcore2 = None  # type: ignore[assignment]
 
 
 class OutcomeClass(StrEnum):
@@ -78,21 +90,14 @@ _UNKNOWN = Decision(
 )
 
 
-def _libs() -> tuple:
-    return tuple(m for m in (httpx, httpx2) if m is not None)
-
-
 # Nothing was written to the wire: connection refused / DNS / connect timeout, or no pooled
-# connection acquired.
+# connection acquired. Every other exception (read/write timeout, protocol error, anything
+# unrecognised) is "may have been sent" and classifies UNKNOWN.
 _NOT_SENT: tuple[type[BaseException], ...] = tuple(
     cls
-    for lib in _libs()
+    for lib in (httpx, httpx2, httpcore, httpcore2)
+    if lib is not None
     for cls in (lib.ConnectError, lib.ConnectTimeout, lib.PoolTimeout)
-)
-# Any other transport failure or timeout: the request may have reached the provider.
-_MAYBE_SENT: tuple[type[BaseException], ...] = (
-    *(lib.TransportError for lib in _libs()),
-    TimeoutError,  # also asyncio.TimeoutError on Python 3.11+
 )
 
 
@@ -103,25 +108,25 @@ def classify_response(*, has_usage: bool, tier_priced: bool) -> Decision:
     return _SETTLED if tier_priced else _UNPRICED
 
 
-def _chain_verdict(exc: BaseException) -> Literal["not_sent", "maybe_sent", "none"]:
-    """The outermost recognised error in the cause/context graph decides."""
+def _connect_failed(exc: BaseException) -> bool:
+    """True only when ``exc`` is, or is wrapped solely by SDK wrappers around, a not-sent error.
+
+    Start at the raised exception. While it is an ``openai.APIConnectionError`` (which includes
+    ``APITimeoutError``) step to its ``__cause__``, or to ``__context__`` when there is no cause.
+    The first non-wrapper decides: a known not-sent type is True; anything else (a read/write
+    timeout, a protocol error, ``ValueError``, ``ssl.SSLError``, ``JSONDecodeError``...) is False.
+    The chain is never followed through an unrecognised exception.
+    """
     seen: set[int] = set()
-    stack: list[BaseException] = [exc]
-    while stack:
-        node = stack.pop()
-        if id(node) in seen:
-            continue
+    node: BaseException | None = exc
+    while node is not None and id(node) not in seen:
         seen.add(id(node))
         if isinstance(node, _NOT_SENT):
-            return "not_sent"
-        if isinstance(node, _MAYBE_SENT):
-            return "maybe_sent"
-        # Pop order: __cause__ first, then __context__.
-        if node.__context__ is not None:
-            stack.append(node.__context__)
-        if node.__cause__ is not None:
-            stack.append(node.__cause__)
-    return "none"
+            return True
+        if not isinstance(node, openai.APIConnectionError):
+            return False
+        node = node.__cause__ if node.__cause__ is not None else node.__context__
+    return False
 
 
 def classify_error(
@@ -143,7 +148,7 @@ def classify_error(
         if 400 <= status < 500:
             return _REJECTED
         return _UNKNOWN  # 5xx and anything else
-    if exc is not None and _chain_verdict(exc) == "not_sent":
+    if exc is not None and _connect_failed(exc):
         return _CONNECT_FAILED
     return _UNKNOWN
 

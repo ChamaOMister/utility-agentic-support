@@ -1,5 +1,10 @@
 """Provider outcome classification (spec §5.6 table, row for row). Pure: no DB, no network."""
 
+import json
+import ssl
+
+import httpcore
+import httpcore2
 import httpx
 import httpx2
 import openai
@@ -130,9 +135,17 @@ def test_status_wins_over_exception():
     assert d.outcome is OutcomeClass.UNKNOWN
 
 
+def _api_conn(
+    cause: BaseException | None = None, *, how: str = "cause"
+) -> BaseException:
+    exc = openai.APIConnectionError(request=httpx.Request("POST", "http://x"))
+    if cause is not None:
+        setattr(exc, "__cause__" if how == "cause" else "__context__", cause)
+    return exc
+
+
 def test_connect_error_releases_and_retries():
-    exc = RuntimeError("wrapped")
-    exc.__cause__ = httpx.ConnectError("refused")
+    exc = _api_conn(httpx.ConnectError("refused"))
     d = classify_error(exc=exc, status=None, error_type=None, error_code=None)
     assert d.outcome is OutcomeClass.CONNECT_FAILED
     assert _as_tuple(d) == ("release", None, True)
@@ -145,11 +158,101 @@ def test_connect_error_releases_and_retries():
         httpx.ConnectTimeout("slow"),
         httpx2.ConnectError("refused"),
         httpx2.ConnectTimeout("slow"),
+        httpcore.ConnectError("refused"),
+        httpcore2.ConnectError("refused"),
+        httpcore2.ConnectTimeout("slow"),
     ],
 )
 @pytest.mark.parametrize("how", ["cause", "context"])
-def test_connect_errors_found_via_cause_or_context(inner, how):
-    exc = _chain(RuntimeError("outer"), inner, how=how)
+def test_connect_errors_found_through_sdk_wrapper(inner, how):
+    exc = _api_conn(inner, how=how)
+    d = classify_error(exc=exc, status=None, error_type=None, error_code=None)
+    assert d.outcome is OutcomeClass.CONNECT_FAILED
+
+
+def test_real_sdk_chain_built_by_hand_is_connect_failed():
+    # APIConnectionError -> httpx2.ConnectError -> httpcore2.ConnectError -> ConnectionRefusedError
+    refused = ConnectionRefusedError(111, "Connection refused")
+    core = httpcore2.ConnectError("refused")
+    core.__cause__ = refused
+    mid = httpx2.ConnectError("refused")
+    mid.__cause__ = core
+    d = classify_error(
+        exc=_api_conn(mid), status=None, error_type=None, error_code=None
+    )
+    assert d.outcome is OutcomeClass.CONNECT_FAILED
+    assert _as_tuple(d) == ("release", None, True)
+
+
+def test_real_openai_call_to_closed_port_is_connect_failed():
+    # Offline: a loopback port with nothing listening. Uses the SDK's own httpx2 client; the
+    # connection is refused locally, so no packet leaves the host.
+    import asyncio
+    import socket
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]  # closed again on exit
+
+    async def call() -> BaseException:
+        client = openai.AsyncOpenAI(
+            api_key="test-key", base_url=f"http://127.0.0.1:{port}/v1", max_retries=0
+        )
+        try:
+            await client.responses.create(model="m", input="x")
+        except openai.APIConnectionError as exc:
+            return exc
+        finally:
+            await client.close()
+        raise AssertionError("expected a connection error")
+
+    exc = asyncio.run(call())
+    assert isinstance(exc, openai.APIConnectionError)
+    d = classify_error(exc=exc, status=None, error_type=None, error_code=None)
+    assert d.outcome is OutcomeClass.CONNECT_FAILED
+
+
+@pytest.mark.parametrize(
+    "outer",
+    [
+        ValueError("bad response"),
+        ConnectionResetError("reset"),
+        json.JSONDecodeError("bad", "{", 0),
+        ssl.SSLError("tls"),
+        RuntimeError("wrapped"),
+        openai.APIResponseValidationError(
+            httpx.Response(200, request=httpx.Request("POST", "http://x")), body=None
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "inner", [httpx.ConnectError("old"), httpx2.ConnectError("old")]
+)
+@pytest.mark.parametrize("how", ["cause", "context"])
+def test_unrecognised_outer_exception_never_releases(outer, inner, how):
+    # e.g. `raise ValueError(...)` inside `except httpx2.ConnectError:` on a later attempt: a
+    # request may have been sent, so a ConnectError behind it must not release the reservation.
+    exc = _chain(outer, inner, how=how)
+    d = classify_error(exc=exc, status=None, error_type=None, error_code=None)
+    assert d.outcome is OutcomeClass.UNKNOWN
+    assert _as_tuple(d) == (UNCERTAIN, "provider_outcome_unknown", False)
+
+
+def test_unrecognised_exception_between_wrapper_and_connect_error_is_unknown():
+    exc = _api_conn(_chain(ValueError("mid"), httpx2.ConnectError("old")))
+    d = classify_error(exc=exc, status=None, error_type=None, error_code=None)
+    assert d.outcome is OutcomeClass.UNKNOWN
+
+
+def test_wrapper_follows_cause_branch_only_when_branches_diverge():
+    # __cause__ is a ReadTimeout (maybe sent), __context__ a ConnectError: cause wins -> UNKNOWN.
+    exc = _api_conn(httpx2.ReadTimeout("slow"))
+    exc.__context__ = httpx2.ConnectError("old")
+    d = classify_error(exc=exc, status=None, error_type=None, error_code=None)
+    assert d.outcome is OutcomeClass.UNKNOWN
+    # And the reverse: __cause__ a ConnectError beats a shallow ReadTimeout in __context__.
+    exc = _api_conn(httpx2.ConnectError("refused"))
+    exc.__context__ = httpx2.ReadTimeout("slow")
     d = classify_error(exc=exc, status=None, error_type=None, error_code=None)
     assert d.outcome is OutcomeClass.CONNECT_FAILED
 
@@ -241,7 +344,7 @@ def test_no_status_no_exception_is_unknown():
     assert _as_tuple(d) == (UNCERTAIN, "provider_outcome_unknown", False)
 
 
-def test_cyclic_exception_chain_terminates():
+def test_cyclic_unrecognised_chain_terminates():
     a, b = RuntimeError("a"), RuntimeError("b")
     a.__cause__ = b
     b.__context__ = a
@@ -249,13 +352,12 @@ def test_cyclic_exception_chain_terminates():
     assert d.outcome is OutcomeClass.UNKNOWN
 
 
-def test_cyclic_chain_still_finds_connect_error():
-    a, b = RuntimeError("a"), RuntimeError("b")
+def test_cyclic_wrapper_chain_terminates():
+    a, b = _api_conn(), _api_conn()
     a.__cause__ = b
-    b.__context__ = a
-    b.__cause__ = httpx.ConnectError("x")
+    b.__cause__ = a
     d = classify_error(exc=a, status=None, error_type=None, error_code=None)
-    assert d.outcome is OutcomeClass.CONNECT_FAILED
+    assert d.outcome is OutcomeClass.UNKNOWN
 
 
 def test_response_with_usage_and_priced_tier_settles():
