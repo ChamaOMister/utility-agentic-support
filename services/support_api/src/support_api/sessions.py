@@ -3,7 +3,7 @@
 Order of checks on a state-changing endpoint (dependency declaration order):
   1. Origin must exactly match ``ALLOWED_ORIGINS``            -> 403 ``origin_not_allowed``
   2. ``Content-Type`` must be ``application/json``            -> 415 ``unsupported_media_type``
-  3. Browser session from the cookie (created if absent)
+  3. Browser session from the cookie (never created here; no valid session -> 404)
   4. Conversation loaded by ``(conversation_id, session)``    -> 404 ``not_found``
 Origin and media type come first so a cross-site request learns nothing about which conversation ids
 exist (no ownership oracle). A same-origin caller that sends a valid Origin still sees the 404.
@@ -61,27 +61,46 @@ def _set_cookie_value(token: str) -> str:
     return f"{COOKIE_NAME}={token}; Max-Age={SESSION_TTL_S}; Path=/api; HttpOnly; Secure; SameSite=Lax"
 
 
-async def current_session(request: Request) -> BrowserSession:
-    """The caller's browser session; a missing, unknown or expired cookie yields a new session.
+async def _find_session(
+    conn: AsyncConnection, token: str | None
+) -> BrowserSession | None:
+    if not token:
+        return None
+    row = (
+        await conn.execute(
+            text(
+                "SELECT id, expires_at FROM support.browser_sessions "
+                "WHERE token_sha256 = :h AND expires_at > now()"
+            ),
+            {"h": hash_token(token)},
+        )
+    ).first()
+    return BrowserSession(row.id, row.expires_at) if row is not None else None
 
-    The new cookie is queued on the request and attached by ``SessionCookieMiddleware`` so that it is
-    also sent on error responses (e.g. the 404 for a cookie-less caller).
+
+async def existing_session(request: Request) -> BrowserSession:
+    """The caller's valid session, read-only. Missing, unknown or expired cookie -> NotFound.
+
+    Creates nothing and sets no cookie: only ``POST /api/conversations`` (``current_session``) may
+    insert a ``browser_sessions`` row, so unauthenticated requests cannot grow the table.
     """
-    db = request.app.state.db
-    presented = request.cookies.get(COOKIE_NAME)
-    async with db.begin() as conn:
-        if presented:
-            row = (
-                await conn.execute(
-                    text(
-                        "SELECT id, expires_at FROM support.browser_sessions "
-                        "WHERE token_sha256 = :h AND expires_at > now()"
-                    ),
-                    {"h": hash_token(presented)},
-                )
-            ).first()
-            if row is not None:
-                return BrowserSession(row.id, row.expires_at)
+    async with request.app.state.db.begin() as conn:
+        session = await _find_session(conn, request.cookies.get(COOKIE_NAME))
+    if session is None:
+        raise NotFound
+    return session
+
+
+async def current_session(request: Request) -> BrowserSession:
+    """The caller's session, creating one (used only by conversation creation).
+
+    A missing, unknown or expired cookie yields a new session. The new cookie is queued on the
+    request and attached by ``SessionCookieMiddleware`` so it is also sent on error responses.
+    """
+    async with request.app.state.db.begin() as conn:
+        session = await _find_session(conn, request.cookies.get(COOKIE_NAME))
+        if session is not None:
+            return session
         token = secrets.token_urlsafe(32)  # 256 bits
         row = (
             await conn.execute(
@@ -128,7 +147,7 @@ async def load_owned_conversation(
 async def owned_conversation(
     conversation_id: str,
     request: Request,
-    session: Annotated[BrowserSession, Depends(current_session)],
+    session: Annotated[BrowserSession, Depends(existing_session)],
 ) -> Row:
     try:
         cid = UUID(conversation_id)

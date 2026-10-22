@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 from typing import TextIO
 from uuid import uuid4
 
+from starlette.responses import JSONResponse
+
 # Spec §5.7 allowlist, verbatim, plus the envelope keys the formatter always writes.
 SPEC_ALLOWLIST = (
     "event", "correlation_id", "conversation_id", "turn_id", "claim_version", "tool_name",
@@ -122,10 +124,12 @@ class CorrelationIdMiddleware:
         token = correlation_id.set(cid)
         started = time.perf_counter()
         status = 500
+        response_started = False
 
         async def send_with_header(message) -> None:
-            nonlocal status
+            nonlocal status, response_started
             if message["type"] == "http.response.start":
+                response_started = True
                 status = message["status"]
                 message.setdefault("headers", []).append(
                     (b"x-correlation-id", cid.encode("ascii"))
@@ -133,7 +137,20 @@ class CorrelationIdMiddleware:
             await send(message)
 
         try:
-            await self.app(scope, receive, send_with_header)
+            try:
+                await self.app(scope, receive, send_with_header)
+            except Exception:
+                # Starlette's ServerErrorMiddleware sits outside this middleware, so its 500 would
+                # carry no correlation id and be logged after the contextvar is reset. Handle it here:
+                # log allowlisted metadata only (never the exception text or traceback).
+                _request_log.error(
+                    "unhandled_exception", extra={"error_code": "internal_error"}
+                )
+                if response_started:
+                    raise
+                await JSONResponse({"error": "internal_error"}, status_code=500)(
+                    scope, receive, send_with_header
+                )
         finally:
             _request_log.info(
                 "request_done",

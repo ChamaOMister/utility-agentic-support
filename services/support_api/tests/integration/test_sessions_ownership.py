@@ -1,10 +1,14 @@
 import hashlib
+import io
+import json
+import logging as stdlib_logging
 import re
 import uuid
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
+from support_api import logging as applog
 from support_api.sessions import NotFound, load_owned_conversation
 
 from tests.conftest import ORIGIN, new_client
@@ -115,11 +119,32 @@ async def test_valid_cookie_is_reused_without_new_set_cookie(app):
     assert (await a.get(f"/api/conversations/{cid}")).status_code == 200
 
 
-async def test_get_without_cookie_creates_session_even_when_404(app):
-    a = new_client(app)
-    r = await a.get(f"/api/conversations/{uuid4()}")
-    assert r.status_code == 404
-    assert "uas_session=" in r.headers["set-cookie"]  # not lost on the error path
+async def _session_count(engine) -> int:
+    async with engine.connect() as conn:
+        return (
+            await conn.execute(text("SELECT count(*) FROM support.browser_sessions"))
+        ).scalar_one()
+
+
+async def test_only_create_inserts_a_session(app, support_test_engine):
+    c = new_client(app)
+    before = await _session_count(support_test_engine)
+    for path in (str(uuid4()), "x", "not-a-uuid"):
+        r = await c.get(f"/api/conversations/{path}")
+        assert r.status_code == 404 and r.json() == NOT_FOUND
+        assert "set-cookie" not in r.headers
+    r = await c.post(
+        f"/api/conversations/{uuid4()}/messages",
+        headers=ORIGIN,
+        json={"client_message_id": str(uuid4()), "text": "oi"},
+    )
+    assert r.status_code == 404 and r.json() == NOT_FOUND
+    assert "set-cookie" not in r.headers
+    assert await _session_count(support_test_engine) == before
+
+    r = await c.post("/api/conversations", json={}, headers=ORIGIN)
+    assert r.status_code == 201 and "uas_session=" in r.headers["set-cookie"]
+    assert await _session_count(support_test_engine) == before + 1
 
 
 async def test_unknown_cookie_gets_new_session(app):
@@ -132,7 +157,7 @@ async def test_unknown_cookie_gets_new_session(app):
     assert _token(r) != "forged-token-value"
 
 
-async def test_expired_session_is_replaced_and_loses_conversations(
+async def test_expired_session_loses_conversations_and_is_not_replaced_on_get(
     app, support_test_engine
 ):
     a = new_client(app)
@@ -148,7 +173,9 @@ async def test_expired_session_is_replaced_and_loses_conversations(
         )
     again = await a.get(f"/api/conversations/{cid}")
     assert again.status_code == 404 and again.json() == NOT_FOUND
-    assert _token(again) != token  # a fresh session was issued
+    assert "set-cookie" not in again.headers  # GET never issues a session
+    fresh = await a.post("/api/conversations", json={}, headers=ORIGIN)
+    assert fresh.status_code == 201 and _token(fresh) != token
 
 
 @pytest.mark.parametrize(
@@ -268,6 +295,43 @@ async def test_load_owned_conversation(app, support_test_engine):
             await load_owned_conversation(conn, uuid.UUID(cid), uuid4())
         with pytest.raises(NotFound):
             await load_owned_conversation(conn, uuid4(), owner)
+
+
+async def test_unknown_cookie_on_get_is_404_without_insert(app, support_test_engine):
+    c = new_client(app)
+    c.cookies.set(
+        "uas_session", "forged-token-value", domain="support.test", path="/api"
+    )
+    before = await _session_count(support_test_engine)
+    r = await c.get(f"/api/conversations/{uuid4()}")
+    assert r.status_code == 404 and "set-cookie" not in r.headers
+    assert await _session_count(support_test_engine) == before
+
+
+async def test_unhandled_exception_returns_500_with_correlation_id_and_log(app):
+    stream = io.StringIO()
+    handler = applog.configure(stream=stream)
+
+    @app.get("/api/_boom")
+    async def boom():
+        raise RuntimeError("secret 123.456.789-09")
+
+    try:
+        c = new_client(app)
+        r = await c.get("/api/_boom", headers={"X-Correlation-ID": "boom-12345678"})
+    finally:
+        stdlib_logging.getLogger().removeHandler(handler)
+    assert r.status_code == 500 and r.json() == {"error": "internal_error"}
+    assert r.headers["x-correlation-id"] == "boom-12345678"
+    records = [json.loads(line) for line in stream.getvalue().splitlines()]
+    failed = [x for x in records if x["event"] == "unhandled_exception"]
+    assert len(failed) == 1
+    assert failed[0]["correlation_id"] == "boom-12345678"
+    assert failed[0]["error_code"] == "internal_error"
+    assert failed[0].keys() <= applog.ALLOWED_KEYS
+    done = [x for x in records if x["event"] == "request_done"][-1]
+    assert done["http_status"] == 500 and done["correlation_id"] == "boom-12345678"
+    assert "secret" not in stream.getvalue() and "123.456" not in stream.getvalue()
 
 
 async def test_correlation_id_generated_or_echoed(app):
