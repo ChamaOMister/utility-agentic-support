@@ -38,8 +38,9 @@ class DeadlineExpired(Exception):
 _CLAIM = text(
     "UPDATE support.conversations "
     "SET active_turn_id = :t, claim_version = claim_version + 1, "
-    "active_turn_lease_expires_at = now() + make_interval(secs => :lease) "
-    "WHERE id = :c AND (active_turn_id IS NULL OR active_turn_lease_expires_at <= now()) "
+    "active_turn_lease_expires_at = clock_timestamp() + make_interval(secs => :lease) "
+    "WHERE id = :c AND (active_turn_id IS NULL OR active_turn_lease_expires_at IS NULL "
+    "OR active_turn_lease_expires_at <= clock_timestamp()) "
     "RETURNING claim_version"
 )
 

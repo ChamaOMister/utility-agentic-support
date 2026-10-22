@@ -22,7 +22,7 @@ logger = logging.getLogger("support_api.turns")
 
 _ACTIVE = text(
     "SELECT active_turn_id, "
-    "COALESCE(active_turn_lease_expires_at <= now(), true) AS expired "
+    "COALESCE(active_turn_lease_expires_at <= clock_timestamp(), true) AS expired "
     "FROM support.conversations WHERE id = :c FOR UPDATE"
 )
 _FENCE_OLD_WORKER = text(
@@ -55,7 +55,8 @@ _CLEAR_ACTIVE = text(
 )
 _EXPIRED = text(
     "SELECT id FROM support.conversations "
-    "WHERE active_turn_id IS NOT NULL AND active_turn_lease_expires_at <= now()"
+    "WHERE active_turn_id IS NOT NULL AND (active_turn_lease_expires_at IS NULL "
+    "OR active_turn_lease_expires_at <= clock_timestamp())"
 )
 
 

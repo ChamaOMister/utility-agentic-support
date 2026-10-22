@@ -227,6 +227,8 @@ async def test_stale_worker_cannot_write(
     assert (
         api.billing_routes["list_bills"].call_count == 0
     )  # A's fenced persist failed first
+    # A sent exactly one generation request (before the takeover); B sent one.
+    assert len(api.model.requests) == 2
     assert await items_for(db, turn_id(a_result)) == [
         "user_message",
         "assistant_message",

@@ -437,7 +437,8 @@ async def expire_lease(db, conversation_id) -> None:
         await conn.execute(
             text(
                 "UPDATE support.conversations "
-                "SET active_turn_lease_expires_at = now() - interval '1 second' WHERE id = :c"
+                "SET active_turn_lease_expires_at = clock_timestamp() - interval '1 second' "
+                "WHERE id = :c"
             ),
             {"c": conversation_id},
         )

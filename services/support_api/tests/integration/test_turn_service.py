@@ -4,6 +4,7 @@ import asyncio
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import text as sql_text
 from support_api.agent.models.scripted import ASK_VERIFICATION, GREETING
 from support_api.app import create_app
 from support_api.catalog import MESSAGES
@@ -12,6 +13,7 @@ from tests.conftest import (
     ORIGIN,
     conversation_row,
     items_for,
+    lock_conversation,
     new_client,
     persona_creds_text,
     turn_id,
@@ -98,6 +100,19 @@ async def test_invalid_body_is_422(api):
     assert api.model.requests_count == 0
 
 
+async def test_lone_surrogate_text_is_422(api, db):
+    """JSON "\\ud800" decodes to a lone surrogate: not UTF-8 encodable, so no turn is created."""
+    path = f"/api/conversations/{api.conversation_id}/messages"
+    for escaped in ("\\ud800", "a\\udfffb"):
+        raw = f'{{"client_message_id": "{uuid4()}", "text": "{escaped}"}}'
+        r = await api.http.post(
+            path, content=raw, headers={**ORIGIN, "Content-Type": "application/json"}
+        )
+        assert r.status_code == 422 and r.json() == {"error": "invalid_request"}, raw
+    assert await turns(db, api.conversation_id) == []
+    assert api.model.requests_count == 0
+
+
 async def test_turn_limit_30(api, db):
     for i in range(30):
         r = await api.send(uuid4(), f"olá {i}")
@@ -158,10 +173,14 @@ async def test_transcript_lists_turns_without_payloads(api, personas):
     assert [UUID(t["client_message_id"]) for t in listed] == [m1, m2]
     for t, sent in zip(listed, (first, second), strict=True):
         assert set(t) == {
-            "turn_id", "client_message_id", "status", "reply", "trace", "created_at",
-            "finished_at",
+            "turn_id", "client_message_id", "text", "status", "reply", "trace",
+            "created_at", "finished_at",
         }  # fmt: skip
         assert t["reply"] == sent.json()["reply"] and t["trace"] == sent.json()["trace"]
+    assert [t["text"] for t in listed] == [
+        "minhas faturas",
+        persona_creds_text(personas[0]),
+    ]
     # Trace is metadata only: no tool arguments or outputs (no CPF, no customer data).
     raw = got.text
     assert personas[0]["cpf"] not in raw and personas[0]["customer_ref"] not in raw
@@ -185,3 +204,27 @@ async def test_other_session_cannot_post(api):
     finally:
         await other.aclose()
     assert api.model.requests_count == 0
+
+
+async def test_lease_is_measured_from_the_claim_not_transaction_start(
+    api, slow_model, db
+):
+    """The 60 s lease starts at the claim, even when step 1 waited on the row lock."""
+    async with db.begin() as conn:
+        await lock_conversation(conn, api.conversation_id)
+        task = asyncio.create_task(api.send(uuid4(), "olá"))
+        await asyncio.sleep(
+            1.0
+        )  # the submission's step-1 transaction waits on the row lock
+        assert not task.done()
+        released_at = (
+            await conn.execute(sql_text("SELECT clock_timestamp()"))
+        ).scalar_one()
+    try:
+        await asyncio.wait_for(slow_model.entered.wait(), 10)
+        row = await conversation_row(db, api.conversation_id)
+    finally:
+        slow_model.release()
+    assert (await asyncio.wait_for(task, 10)).status_code == 200
+    lease_s = (row.active_turn_lease_expires_at - released_at).total_seconds()
+    assert lease_s >= 60 - 0.05, lease_s

@@ -1,6 +1,7 @@
 """Chat channel routes: conversation create/read and message submission (spec §5.1, §5.5)."""
 
 import json
+import re
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -20,15 +21,19 @@ from ..turns.service import TurnLimits, submit_message
 router = APIRouter(prefix="/api/conversations")
 
 MAX_TEXT_CODE_POINTS = 2000
+_SURROGATE = re.compile("[\ud800-\udfff]")
 
 _NEEDS_RECOVERY = text(
-    "SELECT active_turn_id IS NOT NULL AND active_turn_lease_expires_at <= now() "
+    "SELECT active_turn_id IS NOT NULL AND (active_turn_lease_expires_at IS NULL "
+    "OR active_turn_lease_expires_at <= clock_timestamp()) "
     "FROM support.conversations WHERE id = :c"
 )
 _LOCK = text("SELECT 1 FROM support.conversations WHERE id = :c FOR UPDATE")
 _TURNS = text(
-    "SELECT id, client_message_id, status, reply, trace, created_at, finished_at "
-    "FROM support.turns WHERE conversation_id = :c ORDER BY created_at, id"
+    "SELECT t.id, t.client_message_id, t.status, t.reply, t.trace, t.created_at, "
+    "t.finished_at, (SELECT i.payload ->> 'content' FROM support.conversation_items i "
+    " WHERE i.turn_id = t.id AND i.kind = 'user_message' ORDER BY i.seq LIMIT 1) AS text "
+    "FROM support.turns t WHERE t.conversation_id = :c ORDER BY t.created_at, t.id"
 )
 
 
@@ -57,7 +62,7 @@ async def create_conversation(
 async def get_conversation(
     request: Request, conversation: OwnedConversation
 ) -> dict[str, list]:
-    """The turns in creation order (metadata and replies only, never tool payloads)."""
+    """The turns in creation order: user text, reply and trace metadata, never tool payloads."""
     db = request.app.state.db
     cid = conversation.id
     async with db.begin() as conn:
@@ -70,6 +75,7 @@ async def get_conversation(
             {
                 "turn_id": str(r.id),
                 "client_message_id": str(r.client_message_id),
+                "text": r.text,
                 "status": r.status,
                 "reply": r.reply,
                 "trace": r.trace,
@@ -104,6 +110,9 @@ async def post_message(
     # Code points, not bytes or UTF-16 units: 2,000 "ç" or emoji are allowed (Review Focus 4).
     if not 1 <= len(message_text) <= MAX_TEXT_CODE_POINTS:
         return _invalid("text_length")
+    # JSON "\ud800" escapes decode to lone surrogates (U+D800-U+DFFF), which are not UTF-8.
+    if _SURROGATE.search(message_text):
+        return _invalid()
 
     state = request.app.state
     result = await submit_message(
