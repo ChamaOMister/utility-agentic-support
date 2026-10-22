@@ -350,17 +350,22 @@ def billing_server(tmp_path_factory):
 # ---------------------------------------------------------------------------
 @pytest_asyncio.fixture
 async def db(settings):
+    from sqlalchemy import text
     from support_api.db import Database
 
     database = Database(settings.support_database_url)
+    # Identifier lockouts are keyed by hash, not conversation, so state would leak between tests
+    # that share a hash: start every test with no attempt slots and no identifier counters.
+    async with database.begin() as conn:
+        await conn.execute(text("DELETE FROM support.verification_attempts"))
+        await conn.execute(text("DELETE FROM support.identifier_lockouts"))
     try:
         yield database
     finally:
         await database.dispose()
 
 
-@pytest_asyncio.fixture
-async def conversation(db):
+async def make_conversation(db):
     """A browser session plus one conversation row; returns the conversation id."""
     from sqlalchemy import text
 
@@ -385,6 +390,17 @@ async def conversation(db):
         ).scalar_one()
 
 
+@pytest_asyncio.fixture
+async def conversation(db):
+    """A browser session plus one conversation row; returns the conversation id."""
+    return await make_conversation(db)
+
+
+def _cid(conversation_or_claim):
+    """Helpers accept a conversation id or a Claim (anything with ``conversation_id``)."""
+    return getattr(conversation_or_claim, "conversation_id", conversation_or_claim)
+
+
 async def claim_in_tx(db, conversation_id, turn_id, lease_s: int = 60):
     """Claim in its own transaction (begin -> try_claim -> commit). Returns Claim | None."""
     from support_api.turns.claim import try_claim
@@ -395,6 +411,8 @@ async def claim_in_tx(db, conversation_id, turn_id, lease_s: int = 60):
 
 async def expire_lease(db, conversation_id) -> None:
     from sqlalchemy import text
+
+    conversation_id = _cid(conversation_id)
 
     async with db.begin() as conn:
         await conn.execute(
@@ -408,6 +426,7 @@ async def expire_lease(db, conversation_id) -> None:
 
 async def take_over(db, conversation_id):
     """Expire the current lease and claim as a new turn; returns the new Claim."""
+    conversation_id = _cid(conversation_id)
     await expire_lease(db, conversation_id)
     claim = await claim_in_tx(db, conversation_id, uuid.uuid4())
     assert claim is not None
@@ -465,3 +484,155 @@ def crash_at():
         return _Crashing()
 
     return make
+
+
+# ---------------------------------------------------------------------------
+# Identity helpers (Task 9): claimed conversations, attempt slots, counters, assurance.
+# Reused by Task 10 (authenticate_customer, tool gating) and Task 17 (turn pipeline).
+# ---------------------------------------------------------------------------
+HASH = (
+    "a" * 64
+)  # a stand-in identifier lockout hash (hex HMAC shape); never a real identifier
+
+
+async def make_claimed_conversation(db):
+    """A new conversation with a real ``turns`` row, claimed by that turn. Returns the Claim."""
+    from sqlalchemy import text
+
+    conversation_id = await make_conversation(db)
+    turn_id = uuid.uuid4()
+    async with db.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO support.turns (id, conversation_id, client_message_id, "
+                "text_sha256, correlation_id) VALUES (:t, :c, :m, 'x', 'corr')"
+            ),
+            {"t": turn_id, "c": conversation_id, "m": uuid.uuid4()},
+        )
+    claim = await claim_in_tx(db, conversation_id, turn_id)
+    assert claim is not None
+    return claim
+
+
+@pytest_asyncio.fixture
+async def claimed_conversation(db):
+    return await make_claimed_conversation(db)
+
+
+@pytest_asyncio.fixture
+async def ten_claimed_conversations(db):
+    return list(
+        await asyncio.gather(*(make_claimed_conversation(db) for _ in range(10)))
+    )
+
+
+async def admit_in_fenced(
+    db, claim, identifier_hash, *, barrier: asyncio.Barrier | None = None
+):
+    """``admit`` inside its own ``fenced`` transaction, as a turn worker runs it.
+
+    With ``barrier``, every caller holds its fenced transaction (conversation row locked, claim
+    verified) and waits there until all parties arrive, so concurrent admissions truly overlap.
+    Returns the attempt id; ``AdmissionRejected`` propagates.
+    """
+    from support_api.identity.attempts import admit
+    from support_api.turns.claim import fenced
+
+    async with fenced(db, claim) as conn:
+        if barrier is not None:
+            await asyncio.wait_for(barrier.wait(), 10)
+        return await admit(conn, claim, identifier_hash)
+
+
+async def fail_attempt(db, claim, identifier_hash=HASH):
+    """Admit then record ``failed``; returns the attempt id."""
+    from support_api.identity.attempts import record_outcome
+
+    attempt = await admit_in_fenced(db, claim, identifier_hash)
+    assert await record_outcome(db, attempt, "failed") is True
+    return attempt
+
+
+@pytest_asyncio.fixture
+async def attempt(db, claimed_conversation):
+    """An admitted, in-flight attempt slot on ``claimed_conversation``."""
+    return await admit_in_fenced(db, claimed_conversation, HASH)
+
+
+@pytest_asyncio.fixture
+async def claimed_conversation_with_two_failures(db, claimed_conversation):
+    """Two recorded failures for ``HASH`` on both the identifier and this conversation."""
+    await fail_attempt(db, claimed_conversation)
+    await fail_attempt(db, claimed_conversation)
+    return claimed_conversation
+
+
+@pytest_asyncio.fixture
+async def verified_conversation(db, claimed_conversation):
+    """A claimed conversation with kba assurance applied (customer_ref cus_a, first name Ana)."""
+    from support_api.identity.attempts import apply_verified
+
+    attempt = await admit_in_fenced(db, claimed_conversation, HASH)
+    assert await apply_verified(db, claimed_conversation, attempt, "cus_a", "Ana")
+    return claimed_conversation
+
+
+async def counters(db, attempt_id):
+    """Failure counters and lock state for the identifier and conversation of ``attempt_id``."""
+    from types import SimpleNamespace
+
+    from sqlalchemy import text
+
+    async with db.begin() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    "SELECT COALESCE(il.failed_count, 0) AS identifier_failed, "
+                    "COALESCE(il.locked_until > now(), false) AS identifier_locked, "
+                    "COALESCE(ca.failed_attempts, 0) AS conversation_failed, "
+                    "COALESCE(ca.locked_until > now(), false) AS conversation_locked "
+                    "FROM support.verification_attempts va "
+                    "LEFT JOIN support.identifier_lockouts il "
+                    "  ON il.identifier_hash = va.identifier_hash "
+                    "LEFT JOIN support.conversation_auth ca "
+                    "  ON ca.conversation_id = va.conversation_id "
+                    "WHERE va.id = :a"
+                ),
+                {"a": attempt_id},
+            )
+        ).one()
+    return SimpleNamespace(**row._mapping)
+
+
+async def attempt_status(db, attempt_id) -> str:
+    from sqlalchemy import text
+
+    async with db.begin() as conn:
+        return (
+            await conn.execute(
+                text("SELECT status FROM support.verification_attempts WHERE id = :a"),
+                {"a": attempt_id},
+            )
+        ).scalar_one()
+
+
+async def assurance(db, conversation_or_claim):
+    from support_api.identity.assurance import current_assurance
+
+    async with db.begin() as conn:
+        return await current_assurance(conn, _cid(conversation_or_claim))
+
+
+async def expire_verification(db, conversation_or_claim) -> None:
+    """Backdate ``verified_expires_at`` so the verification has just expired."""
+    from sqlalchemy import text
+
+    async with db.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE support.conversation_auth "
+                "SET verified_expires_at = now() - interval '1 second' "
+                "WHERE conversation_id = :c"
+            ),
+            {"c": _cid(conversation_or_claim)},
+        )
