@@ -65,5 +65,17 @@ services:
       timeout: 3s
       retries: 12
 
+  web:
+    build: ./web
+    restart: unless-stopped
+    depends_on:
+      support-api:
+        condition: service_healthy
+    environment:
+      VITE_API_TARGET: http://support-api:8000
+      GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN: ${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}
+    ports:
+      - "5173:5173"
+
 volumes:
   pgdata:

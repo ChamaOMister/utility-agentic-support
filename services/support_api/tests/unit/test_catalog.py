@@ -36,3 +36,12 @@ def test_config_placeholders_keep_live_gate_closed():
         models["gpt-6-luna"]["verified"] is False
         and models["gpt-6-luna"]["reasoning_items"] is None
     )
+
+
+def test_web_fallback_snapshot_matches_the_central_catalog():
+    import json
+    from support_api.catalog import UI_MESSAGES
+    from tests.conftest import REPO_ROOT
+
+    snapshot = json.loads((REPO_ROOT / 'web/src/ui-text.json').read_text())
+    assert snapshot == {**UI_MESSAGES, 'offline_badge': MESSAGES['offline_badge']}

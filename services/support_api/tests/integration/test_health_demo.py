@@ -1,10 +1,14 @@
 from sqlalchemy import text
+from support_api.catalog import MESSAGES, UI_MESSAGES
 
 
 async def test_health_reports_scripted_mode(client):
     resp = await client.get("/api/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok", "mode": "scripted", "live_enabled": False}
+    assert resp.json() == {
+        "status": "ok", "mode": "scripted", "live_enabled": False,
+        "ui": {**UI_MESSAGES, "offline_badge": MESSAGES["offline_badge"]},
+    }
 
 
 async def test_demo_customers_reads_persona_file(client, personas):

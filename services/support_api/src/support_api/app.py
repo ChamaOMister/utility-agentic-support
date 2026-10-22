@@ -13,6 +13,7 @@ from .agent.models.base import ChatModel
 from .agent.models.openai_model import OpenAIResponsesModel
 from .agent.models.scripted import ScriptedModel
 from .channels.chat import router as chat_router
+from .catalog import MESSAGES, UI_MESSAGES
 from .checkpoints import Checkpoints
 from .db import Database
 from .demo import load_demo_customers
@@ -114,11 +115,12 @@ def create_app(
     app.add_middleware(CorrelationIdMiddleware)
 
     @app.get("/api/health")
-    async def health() -> dict[str, str | bool]:
+    async def health() -> dict:
         return {
             "status": "ok",
             "mode": settings.llm_provider,
             "live_enabled": settings.live_llm_enabled,
+            "ui": {**UI_MESSAGES, "offline_badge": MESSAGES["offline_badge"]},
         }
 
     if settings.demo_data_endpoint_enabled:

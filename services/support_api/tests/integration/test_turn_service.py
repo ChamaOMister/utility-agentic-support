@@ -175,9 +175,10 @@ async def test_transcript_lists_turns_without_payloads(api, personas):
     for t, sent in zip(listed, (first, second), strict=True):
         assert set(t) == {
             "turn_id", "client_message_id", "text", "status", "reply", "trace",
-            "created_at", "finished_at",
+            "created_at", "finished_at", "correlation_id",
         }  # fmt: skip
         assert t["reply"] == sent.json()["reply"] and t["trace"] == sent.json()["trace"]
+        assert t["correlation_id"] == sent.headers["X-Correlation-ID"]
     assert [t["text"] for t in listed] == [
         "minhas faturas",
         persona_creds_text(personas[0]),

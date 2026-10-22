@@ -31,7 +31,7 @@ _NEEDS_RECOVERY = text(
 _LOCK = text("SELECT 1 FROM support.conversations WHERE id = :c FOR UPDATE")
 _TURNS = text(
     "SELECT t.id, t.client_message_id, t.status, t.reply, t.trace, t.created_at, "
-    "t.finished_at, (SELECT i.payload ->> 'content' FROM support.conversation_items i "
+    "t.finished_at, t.correlation_id, (SELECT i.payload ->> 'content' FROM support.conversation_items i "
     " WHERE i.turn_id = t.id AND i.kind = 'user_message' ORDER BY i.seq LIMIT 1) AS text "
     "FROM support.turns t WHERE t.conversation_id = :c ORDER BY t.created_at, t.id"
 )
@@ -75,6 +75,7 @@ async def get_conversation(
             {
                 "turn_id": str(r.id),
                 "client_message_id": str(r.client_message_id),
+                "correlation_id": str(r.correlation_id),
                 "text": r.text,
                 "status": r.status,
                 "reply": r.reply,

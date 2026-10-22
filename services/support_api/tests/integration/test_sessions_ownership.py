@@ -377,3 +377,16 @@ async def test_correlation_id_boundaries(app):
     for ok in ("a" * 8, "A1-" + "z" * 61):
         r = await c.get("/api/health", headers={"X-Correlation-ID": ok})
         assert r.headers["x-correlation-id"] == ok
+
+
+async def test_transcript_retains_original_turn_correlation_id(app):
+    client = new_client(app)
+    cid = (await client.post('/api/conversations', json={}, headers=ORIGIN)).json()['conversation_id']
+    original = '694f551e-cd9c-4940-a34a-b7163fd8d042'
+    response = await client.post(f'/api/conversations/{cid}/messages',
+        headers={**ORIGIN, 'X-Correlation-ID': original},
+        json={'client_message_id': str(uuid4()), 'text': 'olá'})
+    assert response.status_code == 200
+    restored = await client.get(f'/api/conversations/{cid}')
+    assert restored.headers['X-Correlation-ID'] != original
+    assert restored.json()['turns'][0]['correlation_id'] == original

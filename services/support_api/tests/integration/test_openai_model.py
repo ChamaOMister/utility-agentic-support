@@ -698,3 +698,54 @@ async def test_valid_message_content_and_reasoning_remain_intact(
     assert (await only_llm_call(db, ctx.claim)).status == "settled"
     assert await live_blocked_reason(db, ctx.claim) is None
     assert openai_mock.route("responses").call_count == 1
+
+
+async def test_trace_exposes_only_known_model_usage_metadata(
+    model, request_body, ctx, openai_mock, db
+):
+    await generate(model, request_body, ctx)
+    count, generation = ctx.trace
+    assert count['kind'] == 'token_count'
+    assert count['input_tokens'] == 100
+    assert count['estimated_cost_usd'] is None  # counting is verified unbilled, no ledger row
+    assert generation['kind'] == 'generation'
+    assert generation['service_tier'] == 'default'
+    assert generation['input_tokens'] == 100
+    assert generation['output_tokens'] == 10
+    assert generation['estimated_cost_usd'] == '0.000203'
+    assert generation['outcome_class'] == 'settled'
+    assert not {'input', 'output', 'arguments', 'payload', 'instructions'} & generation.keys()
+
+
+async def test_trace_unknown_usage_remains_null(model, request_body, ctx, openai_mock):
+    openai_mock.route('responses').mock(return_value=error_response(500))
+    with pytest.raises(ModelUnavailable):
+        await generate(model, request_body, ctx)
+    generation = ctx.trace[-1]
+    assert generation['input_tokens'] is None
+    assert generation['output_tokens'] is None
+    assert generation['estimated_cost_usd'] is None
+    assert generation['outcome_class'] == 'unknown'
+
+
+async def test_api_trace_preserves_model_metadata_on_transcript_reload(api_live_mocked):
+    sent = await api_live_mocked.send(uuid4(), 'olá')
+    calls = sent.json()['trace']['model_calls']
+    assert calls[0]['kind'] == 'token_count' and calls[0]['input_tokens'] == 100
+    assert calls[-1]['service_tier'] == 'default'
+    assert calls[-1]['estimated_cost_usd'] == '0.000203'
+    assert calls[-1]['outcome_class'] == 'settled'
+    transcript = await api_live_mocked.transcript()
+    assert transcript.json()['turns'][0]['trace']['model_calls'] == calls
+
+
+async def test_failed_count_is_visible_as_unknown_usage_metadata(api_live_mocked, openai_mock, db):
+    openai_mock.route('input_tokens').mock(return_value=error_response(500))
+    sent = await api_live_mocked.send(uuid4(), 'olá')
+    calls = sent.json()['trace']['model_calls']
+    assert len(calls) == 1
+    assert calls[0]['kind'] == 'token_count'
+    assert calls[0]['outcome_class'] == 'count_failed'
+    assert calls[0]['input_tokens'] is None
+    assert calls[0]['estimated_cost_usd'] is None
+    assert await llm_calls(db, api_live_mocked.conversation_id) == []
