@@ -1,0 +1,1291 @@
+[
+  {
+    "persona": "A",
+    "customer_ref": "cus_7997590328b0",
+    "first_name": "Ana",
+    "full_name": "Ana Exemplo da Silva",
+    "cpf": "00227119371",
+    "account_number": "9851269616",
+    "birth_date": "1994-12-25",
+    "phone": "+5581902683015",
+    "situation": "One open bill and one overdue bill",
+    "address": {
+      "street": "Rua das Acácias Fictícias, 100",
+      "neighborhood": "Jardim Exemplo",
+      "city": "Campinas",
+      "state": "SP"
+    },
+    "tariff_class": "residencial",
+    "account_status": "active",
+    "installations": [
+      {
+        "installation_id": "inst_5a44ae040c03",
+        "label": "Casa"
+      }
+    ],
+    "bills": [
+      {
+        "bill_id": "bill_0c6b2c2c2909",
+        "installation_id": "inst_5a44ae040c03",
+        "reference_month": "2026-09",
+        "issue_date": "2026-10-05",
+        "due_date": "2026-10-28",
+        "amount_brl": "196.63",
+        "status": "open",
+        "consumption_kwh": 207,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "184.23"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_3c0c3afe96c2",
+        "installation_id": "inst_5a44ae040c03",
+        "reference_month": "2026-08",
+        "issue_date": "2026-09-05",
+        "due_date": "2026-09-28",
+        "amount_brl": "221.44",
+        "status": "overdue",
+        "consumption_kwh": 230,
+        "tariff_flag": "amarela",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "204.70"
+          },
+          {
+            "description": "Bandeira amarela",
+            "amount_brl": "4.34"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_21b58bfa8224",
+        "installation_id": "inst_5a44ae040c03",
+        "reference_month": "2026-07",
+        "issue_date": "2026-08-05",
+        "due_date": "2026-08-28",
+        "amount_brl": "166.90",
+        "status": "paid",
+        "consumption_kwh": 170,
+        "tariff_flag": "amarela",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "151.30"
+          },
+          {
+            "description": "Bandeira amarela",
+            "amount_brl": "3.20"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_a39e4efc1927",
+        "installation_id": "inst_5a44ae040c03",
+        "reference_month": "2026-06",
+        "issue_date": "2026-07-05",
+        "due_date": "2026-07-28",
+        "amount_brl": "166.37",
+        "status": "paid",
+        "consumption_kwh": 173,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "153.97"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_1b4a9f7db54b",
+        "installation_id": "inst_5a44ae040c03",
+        "reference_month": "2026-05",
+        "issue_date": "2026-06-05",
+        "due_date": "2026-06-28",
+        "amount_brl": "206.89",
+        "status": "paid",
+        "consumption_kwh": 214,
+        "tariff_flag": "amarela",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "190.46"
+          },
+          {
+            "description": "Bandeira amarela",
+            "amount_brl": "4.03"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_821226795565",
+        "installation_id": "inst_5a44ae040c03",
+        "reference_month": "2026-04",
+        "issue_date": "2026-05-05",
+        "due_date": "2026-05-28",
+        "amount_brl": "205.53",
+        "status": "paid",
+        "consumption_kwh": 217,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "193.13"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_014d7373e0dc",
+        "installation_id": "inst_5a44ae040c03",
+        "reference_month": "2026-03",
+        "issue_date": "2026-04-05",
+        "due_date": "2026-04-28",
+        "amount_brl": "169.93",
+        "status": "paid",
+        "consumption_kwh": 177,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "157.53"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_95b724141b0f",
+        "installation_id": "inst_5a44ae040c03",
+        "reference_month": "2026-02",
+        "issue_date": "2026-03-05",
+        "due_date": "2026-03-28",
+        "amount_brl": "196.63",
+        "status": "paid",
+        "consumption_kwh": 207,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "184.23"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "persona": "B",
+    "customer_ref": "cus_f694d82c9254",
+    "first_name": "Bruno",
+    "full_name": "Bruno Teste Oliveira",
+    "cpf": "10499008049",
+    "account_number": "7846075359",
+    "birth_date": "1997-12-17",
+    "phone": "+5531944586895",
+    "situation": "All bills paid",
+    "address": {
+      "street": "Avenida Modelo, 2050",
+      "neighborhood": "Centro Simulado",
+      "city": "Belo Horizonte",
+      "state": "MG"
+    },
+    "tariff_class": "residencial",
+    "account_status": "active",
+    "installations": [
+      {
+        "installation_id": "inst_4c2a188d0380",
+        "label": "Casa"
+      }
+    ],
+    "bills": [
+      {
+        "bill_id": "bill_133c19cb3fc1",
+        "installation_id": "inst_4c2a188d0380",
+        "reference_month": "2026-09",
+        "issue_date": "2026-10-05",
+        "due_date": "2026-10-28",
+        "amount_brl": "165.48",
+        "status": "paid",
+        "consumption_kwh": 172,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "153.08"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_7c8bfe6fa589",
+        "installation_id": "inst_4c2a188d0380",
+        "reference_month": "2026-08",
+        "issue_date": "2026-09-05",
+        "due_date": "2026-09-28",
+        "amount_brl": "158.36",
+        "status": "paid",
+        "consumption_kwh": 164,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "145.96"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_8872bd3ff89c",
+        "installation_id": "inst_4c2a188d0380",
+        "reference_month": "2026-07",
+        "issue_date": "2026-08-05",
+        "due_date": "2026-08-28",
+        "amount_brl": "166.90",
+        "status": "paid",
+        "consumption_kwh": 170,
+        "tariff_flag": "amarela",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "151.30"
+          },
+          {
+            "description": "Bandeira amarela",
+            "amount_brl": "3.20"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_0a915d9a5162",
+        "installation_id": "inst_4c2a188d0380",
+        "reference_month": "2026-06",
+        "issue_date": "2026-07-05",
+        "due_date": "2026-07-28",
+        "amount_brl": "188.72",
+        "status": "paid",
+        "consumption_kwh": 194,
+        "tariff_flag": "amarela",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "172.66"
+          },
+          {
+            "description": "Bandeira amarela",
+            "amount_brl": "3.66"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_fdb4f2ab1987",
+        "installation_id": "inst_4c2a188d0380",
+        "reference_month": "2026-05",
+        "issue_date": "2026-06-05",
+        "due_date": "2026-06-28",
+        "amount_brl": "184.17",
+        "status": "paid",
+        "consumption_kwh": 189,
+        "tariff_flag": "amarela",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "168.21"
+          },
+          {
+            "description": "Bandeira amarela",
+            "amount_brl": "3.56"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_09477af2df65",
+        "installation_id": "inst_4c2a188d0380",
+        "reference_month": "2026-04",
+        "issue_date": "2026-05-05",
+        "due_date": "2026-05-28",
+        "amount_brl": "158.36",
+        "status": "paid",
+        "consumption_kwh": 164,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "145.96"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_b58bc124f4c2",
+        "installation_id": "inst_4c2a188d0380",
+        "reference_month": "2026-03",
+        "issue_date": "2026-04-05",
+        "due_date": "2026-04-28",
+        "amount_brl": "153.27",
+        "status": "paid",
+        "consumption_kwh": 155,
+        "tariff_flag": "amarela",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "137.95"
+          },
+          {
+            "description": "Bandeira amarela",
+            "amount_brl": "2.92"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_809b843caf62",
+        "installation_id": "inst_4c2a188d0380",
+        "reference_month": "2026-02",
+        "issue_date": "2026-03-05",
+        "due_date": "2026-03-28",
+        "amount_brl": "145.90",
+        "status": "paid",
+        "consumption_kwh": 150,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "133.50"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_bb255ea5b553",
+        "installation_id": "inst_4c2a188d0380",
+        "reference_month": "2026-01",
+        "issue_date": "2026-02-05",
+        "due_date": "2026-02-28",
+        "amount_brl": "178.83",
+        "status": "paid",
+        "consumption_kwh": 187,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "166.43"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_03bf77da99ee",
+        "installation_id": "inst_4c2a188d0380",
+        "reference_month": "2025-12",
+        "issue_date": "2026-01-05",
+        "due_date": "2026-01-28",
+        "amount_brl": "141.46",
+        "status": "paid",
+        "consumption_kwh": 142,
+        "tariff_flag": "amarela",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "126.38"
+          },
+          {
+            "description": "Bandeira amarela",
+            "amount_brl": "2.68"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "persona": "C",
+    "customer_ref": "cus_50290e71ad22",
+    "first_name": "Carla",
+    "full_name": "Carla Fictícia Souza",
+    "cpf": "19304569800",
+    "account_number": "8199023736",
+    "birth_date": "1969-02-07",
+    "phone": "+5531932665265",
+    "situation": "Two installations (home and small shop)",
+    "address": {
+      "street": "Travessa do Exemplo, 33",
+      "neighborhood": "Vila Sintética",
+      "city": "Curitiba",
+      "state": "PR"
+    },
+    "tariff_class": "residencial",
+    "account_status": "active",
+    "installations": [
+      {
+        "installation_id": "inst_bc15b7631290",
+        "label": "Casa"
+      },
+      {
+        "installation_id": "inst_d646ccda8082",
+        "label": "Loja pequena"
+      }
+    ],
+    "bills": [
+      {
+        "bill_id": "bill_26d7804ca7fb",
+        "installation_id": "inst_bc15b7631290",
+        "reference_month": "2026-09",
+        "issue_date": "2026-10-05",
+        "due_date": "2026-10-28",
+        "amount_brl": "185.95",
+        "status": "open",
+        "consumption_kwh": 195,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "173.55"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_26f2738f4dd8",
+        "installation_id": "inst_d646ccda8082",
+        "reference_month": "2026-09",
+        "issue_date": "2026-10-05",
+        "due_date": "2026-10-28",
+        "amount_brl": "113.86",
+        "status": "open",
+        "consumption_kwh": 114,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "101.46"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_ca5809ca98f5",
+        "installation_id": "inst_bc15b7631290",
+        "reference_month": "2026-08",
+        "issue_date": "2026-09-05",
+        "due_date": "2026-09-28",
+        "amount_brl": "229.23",
+        "status": "paid",
+        "consumption_kwh": 232,
+        "tariff_flag": "vermelha",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "206.48"
+          },
+          {
+            "description": "Bandeira vermelha",
+            "amount_brl": "10.35"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_dc03eef97aa8",
+        "installation_id": "inst_d646ccda8082",
+        "reference_month": "2026-08",
+        "issue_date": "2026-09-05",
+        "due_date": "2026-09-28",
+        "amount_brl": "127.82",
+        "status": "paid",
+        "consumption_kwh": 127,
+        "tariff_flag": "amarela",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "113.03"
+          },
+          {
+            "description": "Bandeira amarela",
+            "amount_brl": "2.39"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_ac5844588e37",
+        "installation_id": "inst_bc15b7631290",
+        "reference_month": "2026-07",
+        "issue_date": "2026-08-05",
+        "due_date": "2026-08-28",
+        "amount_brl": "201.44",
+        "status": "paid",
+        "consumption_kwh": 208,
+        "tariff_flag": "amarela",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "185.12"
+          },
+          {
+            "description": "Bandeira amarela",
+            "amount_brl": "3.92"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_3ae582dfea41",
+        "installation_id": "inst_d646ccda8082",
+        "reference_month": "2026-07",
+        "issue_date": "2026-08-05",
+        "due_date": "2026-08-28",
+        "amount_brl": "120.55",
+        "status": "paid",
+        "consumption_kwh": 119,
+        "tariff_flag": "amarela",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "105.91"
+          },
+          {
+            "description": "Bandeira amarela",
+            "amount_brl": "2.24"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_bfe0cba6dee3",
+        "installation_id": "inst_bc15b7631290",
+        "reference_month": "2026-06",
+        "issue_date": "2026-07-05",
+        "due_date": "2026-07-28",
+        "amount_brl": "245.07",
+        "status": "paid",
+        "consumption_kwh": 256,
+        "tariff_flag": "amarela",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "227.84"
+          },
+          {
+            "description": "Bandeira amarela",
+            "amount_brl": "4.83"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_afca6e903a40",
+        "installation_id": "inst_d646ccda8082",
+        "reference_month": "2026-06",
+        "issue_date": "2026-07-05",
+        "due_date": "2026-07-28",
+        "amount_brl": "144.18",
+        "status": "paid",
+        "consumption_kwh": 141,
+        "tariff_flag": "vermelha",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "125.49"
+          },
+          {
+            "description": "Bandeira vermelha",
+            "amount_brl": "6.29"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_7b3326fc123a",
+        "installation_id": "inst_bc15b7631290",
+        "reference_month": "2026-05",
+        "issue_date": "2026-06-05",
+        "due_date": "2026-06-28",
+        "amount_brl": "242.91",
+        "status": "paid",
+        "consumption_kwh": 259,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "230.51"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_048dbb6a7249",
+        "installation_id": "inst_d646ccda8082",
+        "reference_month": "2026-05",
+        "issue_date": "2026-06-05",
+        "due_date": "2026-06-28",
+        "amount_brl": "104.93",
+        "status": "paid",
+        "consumption_kwh": 99,
+        "tariff_flag": "vermelha",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "88.11"
+          },
+          {
+            "description": "Bandeira vermelha",
+            "amount_brl": "4.42"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_5f1d93c4e200",
+        "installation_id": "inst_bc15b7631290",
+        "reference_month": "2026-04",
+        "issue_date": "2026-05-05",
+        "due_date": "2026-05-28",
+        "amount_brl": "214.43",
+        "status": "paid",
+        "consumption_kwh": 227,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "202.03"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_ce7656383cad",
+        "installation_id": "inst_d646ccda8082",
+        "reference_month": "2026-04",
+        "issue_date": "2026-05-05",
+        "due_date": "2026-05-28",
+        "amount_brl": "90.72",
+        "status": "paid",
+        "consumption_kwh": 88,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "78.32"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "persona": "D",
+    "customer_ref": "cus_1757d6c3fc38",
+    "first_name": "Diego",
+    "full_name": "Diego Amostra Pereira",
+    "cpf": "19703884202",
+    "account_number": "6428495008",
+    "birth_date": "1982-04-10",
+    "phone": "+5519945512926",
+    "situation": "Recent consumption spike (seeds Milestone 2 bill-dispute scenario)",
+    "address": {
+      "street": "Rua Hipotética, 721",
+      "neighborhood": "Bairro Fixture",
+      "city": "Recife",
+      "state": "PE"
+    },
+    "tariff_class": "residencial",
+    "account_status": "active",
+    "installations": [
+      {
+        "installation_id": "inst_fd929b549468",
+        "label": "Casa"
+      }
+    ],
+    "bills": [
+      {
+        "bill_id": "bill_18b70ce635a3",
+        "installation_id": "inst_fd929b549468",
+        "reference_month": "2026-09",
+        "issue_date": "2026-10-05",
+        "due_date": "2026-10-28",
+        "amount_brl": "482.28",
+        "status": "open",
+        "consumption_kwh": 517,
+        "tariff_flag": "amarela",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "460.13"
+          },
+          {
+            "description": "Bandeira amarela",
+            "amount_brl": "9.75"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_797639150493",
+        "installation_id": "inst_fd929b549468",
+        "reference_month": "2026-08",
+        "issue_date": "2026-09-05",
+        "due_date": "2026-09-28",
+        "amount_brl": "208.20",
+        "status": "paid",
+        "consumption_kwh": 220,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "195.80"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_2dbac9e72316",
+        "installation_id": "inst_fd929b549468",
+        "reference_month": "2026-07",
+        "issue_date": "2026-08-05",
+        "due_date": "2026-08-28",
+        "amount_brl": "179.72",
+        "status": "paid",
+        "consumption_kwh": 188,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "167.32"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_65155da34ec2",
+        "installation_id": "inst_fd929b549468",
+        "reference_month": "2026-06",
+        "issue_date": "2026-07-05",
+        "due_date": "2026-07-28",
+        "amount_brl": "199.30",
+        "status": "paid",
+        "consumption_kwh": 210,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "186.90"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_8bbf3946e5c6",
+        "installation_id": "inst_fd929b549468",
+        "reference_month": "2026-05",
+        "issue_date": "2026-06-05",
+        "due_date": "2026-06-28",
+        "amount_brl": "190.40",
+        "status": "paid",
+        "consumption_kwh": 200,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "178.00"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_38dab840d421",
+        "installation_id": "inst_fd929b549468",
+        "reference_month": "2026-04",
+        "issue_date": "2026-05-05",
+        "due_date": "2026-05-28",
+        "amount_brl": "179.72",
+        "status": "paid",
+        "consumption_kwh": 188,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "167.32"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_c44575b63249",
+        "installation_id": "inst_fd929b549468",
+        "reference_month": "2026-03",
+        "issue_date": "2026-04-05",
+        "due_date": "2026-04-28",
+        "amount_brl": "193.96",
+        "status": "paid",
+        "consumption_kwh": 204,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "181.56"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_9242bc4f1322",
+        "installation_id": "inst_fd929b549468",
+        "reference_month": "2026-02",
+        "issue_date": "2026-03-05",
+        "due_date": "2026-03-28",
+        "amount_brl": "176.16",
+        "status": "paid",
+        "consumption_kwh": 184,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "163.76"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_2f78eff85876",
+        "installation_id": "inst_fd929b549468",
+        "reference_month": "2026-01",
+        "issue_date": "2026-02-05",
+        "due_date": "2026-02-28",
+        "amount_brl": "205.99",
+        "status": "paid",
+        "consumption_kwh": 213,
+        "tariff_flag": "amarela",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "189.57"
+          },
+          {
+            "description": "Bandeira amarela",
+            "amount_brl": "4.02"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "persona": "E",
+    "customer_ref": "cus_5dc6fd6778f0",
+    "first_name": "Elisa",
+    "full_name": "Elisa Demonstração Lima",
+    "cpf": "19770441589",
+    "account_number": "9406640412",
+    "birth_date": "1998-09-22",
+    "phone": "+5541922105414",
+    "situation": "Used for outage demos via fault rules",
+    "address": {
+      "street": "Alameda dos Testes, 12",
+      "neighborhood": "Parque Mock",
+      "city": "Porto Alegre",
+      "state": "RS"
+    },
+    "tariff_class": "residencial",
+    "account_status": "active",
+    "installations": [
+      {
+        "installation_id": "inst_2e23907d19c4",
+        "label": "Casa"
+      }
+    ],
+    "bills": [
+      {
+        "bill_id": "bill_b2e2dffff2f3",
+        "installation_id": "inst_2e23907d19c4",
+        "reference_month": "2026-09",
+        "issue_date": "2026-10-05",
+        "due_date": "2026-10-28",
+        "amount_brl": "189.51",
+        "status": "open",
+        "consumption_kwh": 199,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "177.11"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_f7a5cd5b1f3d",
+        "installation_id": "inst_2e23907d19c4",
+        "reference_month": "2026-08",
+        "issue_date": "2026-09-05",
+        "due_date": "2026-09-28",
+        "amount_brl": "190.40",
+        "status": "paid",
+        "consumption_kwh": 200,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "178.00"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_3345080df6ab",
+        "installation_id": "inst_2e23907d19c4",
+        "reference_month": "2026-07",
+        "issue_date": "2026-08-05",
+        "due_date": "2026-08-28",
+        "amount_brl": "218.71",
+        "status": "paid",
+        "consumption_kwh": 227,
+        "tariff_flag": "amarela",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "202.03"
+          },
+          {
+            "description": "Bandeira amarela",
+            "amount_brl": "4.28"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_5a6a60bdb8ae",
+        "installation_id": "inst_2e23907d19c4",
+        "reference_month": "2026-06",
+        "issue_date": "2026-07-05",
+        "due_date": "2026-07-28",
+        "amount_brl": "168.15",
+        "status": "paid",
+        "consumption_kwh": 175,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "155.75"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_2147d2e554f6",
+        "installation_id": "inst_2e23907d19c4",
+        "reference_month": "2026-05",
+        "issue_date": "2026-06-05",
+        "due_date": "2026-06-28",
+        "amount_brl": "209.09",
+        "status": "paid",
+        "consumption_kwh": 221,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "196.69"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_7b9c403ea824",
+        "installation_id": "inst_2e23907d19c4",
+        "reference_month": "2026-04",
+        "issue_date": "2026-05-05",
+        "due_date": "2026-05-28",
+        "amount_brl": "196.90",
+        "status": "paid",
+        "consumption_kwh": 203,
+        "tariff_flag": "amarela",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "180.67"
+          },
+          {
+            "description": "Bandeira amarela",
+            "amount_brl": "3.83"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      },
+      {
+        "bill_id": "bill_c54d991c86c1",
+        "installation_id": "inst_2e23907d19c4",
+        "reference_month": "2026-03",
+        "issue_date": "2026-04-05",
+        "due_date": "2026-04-28",
+        "amount_brl": "164.59",
+        "status": "paid",
+        "consumption_kwh": 171,
+        "tariff_flag": "verde",
+        "line_items": [
+          {
+            "description": "Consumo de energia elétrica",
+            "amount_brl": "152.19"
+          },
+          {
+            "description": "Bandeira verde (sem acréscimo)",
+            "amount_brl": "0.00"
+          },
+          {
+            "description": "Contribuição de iluminação pública",
+            "amount_brl": "12.40"
+          }
+        ]
+      }
+    ]
+  }
+]
