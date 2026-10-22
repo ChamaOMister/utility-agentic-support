@@ -262,6 +262,27 @@ def test_truncation_never_keeps_older_turn_after_skipping_newer():
     assert kept == []
 
 
+def test_older_small_turn_not_kept_after_newer_large_turn_dropped():
+    def small(t):
+        return [user("oi", t, 0), assistant("ok", t, 1)]
+
+    def large(t):
+        return [user("x" * 600, t, 0), assistant("y" * 600, t, 1)]
+
+    t1, t2, t3 = (
+        _turn("completed", small),
+        _turn("completed", large),
+        _turn("completed", small),
+    )
+    past = [t1, t2, t3]
+    budget = size_of([t3]) + size_of([t1])  # fits T3 and T1, but not T3 + T2
+    assert size_of([t3, t2]) > budget
+    kept = select_turns(
+        past, max_turns=6, token_budget=budget, estimate=estimate_tokens
+    )
+    assert [t.turn_id for t in kept] == [t3.turn_id]
+
+
 def test_max_turns_bound():
     past = conv() * 3
     kept = select_turns(past, max_turns=6, token_budget=10**9, estimate=estimate_tokens)
