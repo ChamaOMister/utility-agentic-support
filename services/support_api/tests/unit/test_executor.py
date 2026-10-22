@@ -2,6 +2,7 @@ import asyncio
 import io
 import json
 import logging
+from dataclasses import asdict
 from datetime import date
 
 import httpx
@@ -665,3 +666,28 @@ async def test_logs_contain_no_arguments_or_data(executor, ctx, respx_mock):
         )  # numbers there could match by chance
         for secret in (CPF_DIGITS, CPF, "1980", "4321", "Ana", "cus_a"):
             assert secret not in json.dumps(line)
+
+
+async def test_unknown_tool_name_is_replaced_everywhere(executor, ctx, respx_mock, db):
+    """M1: a model-supplied unknown tool name never reaches trace, DB row or log."""
+    hostile = f"lookup_{CPF}_{CPF_DIGITS}"
+    stream = io.StringIO()
+    handler = uas_logging.configure(stream)
+    try:
+        result, trace = await executor.run(hostile, "{}", ctx)
+    finally:
+        logging.getLogger().removeHandler(handler)
+    assert result == ToolError(code="invalid_arguments")
+    assert trace.name == "unknown"
+    assert (trace.status, trace.error_code) == ("error", "invalid_arguments")
+    rows = await _tool_rows(db, ctx.claim)
+    assert [r.name for r in rows] == ["unknown"]
+    tool_lines = [
+        json.loads(line)
+        for line in stream.getvalue().splitlines()
+        if "support_api.tools" in line
+    ]
+    assert [line["tool_name"] for line in tool_lines] == ["unknown"]
+    for blob in (json.dumps(asdict(trace)), stream.getvalue(), repr(rows)):
+        assert CPF not in blob and CPF_DIGITS not in blob and "lookup_" not in blob
+    assert respx_mock.calls.call_count == 0

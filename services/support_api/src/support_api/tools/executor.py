@@ -48,6 +48,8 @@ from .schemas import (
 
 logger = logging.getLogger("support_api.tools")
 
+UNKNOWN_TOOL_NAME = "unknown"
+
 _INSERT_TOOL_CALL = text(
     "INSERT INTO support.tool_calls "
     "(turn_id, name, status, error_code, attempts, duration_ms, record_count) "
@@ -116,7 +118,10 @@ class Executor:
         except Exception:  # noqa: BLE001 - any handler failure becomes internal_error
             # Never log the exception text or traceback: it may quote customer data.
             result = ToolError(code="internal_error")
-        trace = self._trace(name, result, state, started)
+        # Unknown names are model-supplied free text (possibly customer data): never
+        # let them into trace metadata, the tool_calls row or the log (spec 5.7).
+        trace_name = name if name in SPEC_BY_NAME else UNKNOWN_TOOL_NAME
+        trace = self._trace(trace_name, result, state, started)
         await self._persist(ctx, trace)  # ClaimLost here propagates
         self._log(trace)
         return result, trace
@@ -303,9 +308,7 @@ class Executor:
                 _INSERT_TOOL_CALL,
                 {
                     "t": ctx.claim.turn_id,
-                    "n": trace.name[
-                        :64
-                    ],  # the name is model-supplied for unknown tools
+                    "n": trace.name,
                     "s": trace.status,
                     "e": trace.error_code,
                     "a": trace.attempts,
@@ -316,7 +319,7 @@ class Executor:
 
     def _log(self, trace: ToolTrace) -> None:
         extra: dict[str, Any] = {
-            "tool_name": trace.name[:64],
+            "tool_name": trace.name,
             "status": trace.status,
             "attempt": trace.attempts,
             "duration_ms": trace.duration_ms,
