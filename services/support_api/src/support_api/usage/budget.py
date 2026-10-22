@@ -329,7 +329,11 @@ async def settle(
 
     Removes the held amount from whichever bucket held it and adds the priced usage to ``spent``.
     Keyed by the call's own row, so a stale worker or a repeat is harmless (``False``).
+    Raises ``ValueError`` for an all-zero ``Usage``: that is no reported usage, and settling it
+    would release the hold (§5.5); the caller must ``release`` or ``mark_uncertain`` instead.
     """
+    if usage.input_tokens + usage.output_tokens == 0:
+        raise ValueError("settle requires reported usage; got zero tokens")
     actual = actual_usd(usage, rate)
     async with db.begin() as conn:
         row = (

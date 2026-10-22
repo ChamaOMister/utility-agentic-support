@@ -189,6 +189,16 @@ async def test_settle_moves_reserved_to_spent(db, reservation):
     assert row.reserved_usd == reservation.amount  # the ledger keeps what was reserved
 
 
+async def test_settle_rejects_zero_usage(db, reservation):
+    """M8 / §5.5: settlement never releases a hold without reported usage."""
+    claim = reservation.claim
+    before = await amounts(db, claim)
+    with pytest.raises(ValueError):
+        await settle(db, reservation.id, Usage(0, 0, 0), RATE)
+    assert await amounts(db, claim) == before
+    assert (await llm_call(db, reservation.id)).status == "reserved"
+
+
 async def test_uncertain_never_released_and_counts_against_cap(db, reservation):
     claim = reservation.claim
     async with fenced(db, claim) as conn:
