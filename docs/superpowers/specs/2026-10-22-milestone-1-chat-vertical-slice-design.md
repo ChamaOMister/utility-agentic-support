@@ -1,6 +1,6 @@
 # Milestone 1 — Chat Vertical Slice: Design Spec
 
-- **Status:** Draft, revision 3 (addresses reviews of 2026-10-22; see §9)
+- **Status:** Draft, revision 4 (addresses reviews of 2026-10-22; see §9)
 - **Date:** 2026-10-22
 - **Scope:** Milestone 1 of `utility-agentic-support` (chat: authentication → bill lookup → useful response)
 
@@ -295,13 +295,31 @@ in exactly one place per integration (billing client; LLM call wrapper). SDK-lev
   active_turn_id=:t AND claim_version=:v FOR UPDATE`. This covers messages and conversation items, tool-call
   rows, verified state, budget reservations, turn completion, and lease release. Zero rows means the claim
   was lost: the transaction rolls back, the worker raises `ClaimLost`, and it stops without writing anything
-  or sending any further provider or billing request. A paused worker that resumes after takeover therefore
+  or sending any further provider or billing request (enforced by the pre-send gate below, within its stated
+  limit). A paused worker that resumes after takeover therefore
   cannot overwrite the new owner's state. Only two writes are unfenced, and both are keyed by their own row,
   not by conversation state:
   - The attempt-outcome transaction (§5.2). It writes the attempt row and failure counters only, never
     assurance or transcript.
   - Settlement of the worker's own `llm_calls` row with usage it actually received (`reserved|uncertain →
     settled`). It never releases a held amount without reported usage.
+- **Pre-send gate and its limit.** Fencing protects database writes. It can't stop an outbound request,
+  because neither OpenAI nor the billing API checks the fencing token. Immediately before every outbound request
+  (token count, generation, each billing attempt, each retry), the worker runs a pre-send gate. The gate
+  re-checks the claim in the database, then checks locally, with no I/O, that the turn deadline has not
+  expired. The request is sent at once, and its total wall-clock time is capped by the remaining deadline.
+  The deadline (45 s) starts after the claim, and the lease (60 s) starts at the claim. So a worker that
+  pauses anywhere before the gate is always stopped: by the claim check if a takeover has happened, or by the
+  deadline check otherwise. The **residual race** is a whole-process stall of at least 15 s
+  (lease − deadline) after the gate passes and before the request completes, such as a SIGSTOP, a VM suspend
+  or a blocked event loop. A DB clock jump of the same size has the same effect. In that case at most one
+  stale request per worker can be sent, or still be in flight, after takeover. Its effects are bounded:
+  - a generation's reservation stays `reserved`, so recovery marks it `uncertain` and blocks live generation;
+  - a billing GET is read-only, and its result is discarded because every later write is fenced;
+  - a verify POST's outcome goes through the attempt-outcome transaction, which counts failures and never
+    grants assurance.
+
+  Milestone 1 does not close this race.
 - **Recovery of abandoned turns.** Recovery runs whenever a request touches a conversation whose active turn
   has an expired lease (message submit, duplicate replay, transcript read). On startup, support-api also
   sweeps every conversation in that state. In one transaction, locking the conversation row:
@@ -463,7 +481,7 @@ Milestone 1 is accepted when all of these pass:
 10. `support_app` receives *permission denied* on schema `billing`.
 11. Duplicate submissions: sequential replay returns the stored reply with no new model/tool calls; concurrent identical submissions produce exactly one turn; same id with different text → 422; concurrent different messages → one 409.
 12. **Crash after send:** a worker reserves, the mocked provider receives the generation request, and the worker is killed before recording the outcome. After lease expiry, a duplicate submission returns the stored `interrupted` reply (not 409), the `llm_calls` row is `uncertain` with its full reservation, live generation is blocked for the conversation, and a new message is answered in scripted mode or with the live-blocked message. The startup sweep produces the same state without any request.
-13. **Stale worker:** worker A claims a turn and is paused; the lease expires; worker B recovers and claims. When A resumes, all of A's fenced writes fail with `ClaimLost`, A sends no further provider or billing requests, and the transcript contains only B's items.
+13. **Stale worker:** worker A claims a turn and is paused at any point before a pre-send gate (§5.5): after a model response, after a budget reservation, after verification-slot admission, or after a claim check with the local deadline then expired. The lease expires; worker B recovers and claims. When A resumes, all of A's fenced writes fail with `ClaimLost`, A sends no further provider or billing requests, and the transcript contains only B's items. The residual race in §5.5 (a process stall of ≥ 15 s after the gate passes) is documented and out of scope for this criterion.
 14. **Late verification outcome after takeover:** a conversation has two failed attempts. Its third verification is in flight (mock billing delayed) when the worker loses its claim and recovery runs. The late `{verified: false}` marks the attempt `failed` and locks both the identifier and the conversation. Assurance, transcript and turn status are unchanged. Replaying the same outcome changes no counter. In the same setup, a late `{verified: true}` records the attempt as `verified` and leaves the conversation's assurance at `none`.
 15. Concurrent budget reservations never exceed the project or conversation cap.
 16. **Outcome classification:** each row of the §5.6 table, driven by mocked HTTP, produces the stated reservation status, live-block state and retry behavior. Specifically: no retry on 400/401/403 or quota 429; a transient 429 with `Retry-After` beyond the remaining deadline is not retried; a transient 429 within the deadline is retried once with a new reservation; unclassified 429 → no retry.
@@ -516,3 +534,7 @@ acceptance, which runs on mocks):
   - `conversation_items` now stores encrypted reasoning items.
   - Rev 3 wording fix: §5.4.1 now separates stored-item retention from per-request filtering of reasoning
     items.
+- **Rev 4 (2026-10-22), plan review:**
+  - §5.5 adds the pre-send gate (claim re-check plus a local deadline check, with total-time-capped requests)
+    and documents the residual stall race that fencing can't close without receiver-side token checks.
+  - AC 13 is scoped to pauses before a pre-send gate; the residual race is excluded from it explicitly.

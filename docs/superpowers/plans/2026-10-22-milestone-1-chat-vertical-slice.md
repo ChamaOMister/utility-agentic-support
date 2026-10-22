@@ -16,7 +16,7 @@ Python SDK (`max_retries=0`), pytest + pytest-asyncio + respx; Vite + React 18 (
 Compose.
 
 **Spec:** [docs/superpowers/specs/2026-10-22-milestone-1-chat-vertical-slice-design.md](../specs/2026-10-22-milestone-1-chat-vertical-slice-design.md)
-(revision 3). Section references (§) below point there; acceptance criteria are cited as **AC n**.
+(revision 4). Section references (§) below point there; acceptance criteria are cited as **AC n**.
 
 ## Global Constraints
 
@@ -32,7 +32,9 @@ Compose.
 - Logs use the allowlist in §5.7 verbatim. Payloads are never logged.
 - Retry logic lives in exactly one place per integration: `BillingClient` and `OpenAIResponsesModel`. SDK retries
   are off (`max_retries=0`).
-- Every timeout is `min(per_attempt, deadline.remaining())`.
+- Every timeout is `min(per_attempt, deadline.remaining())`. httpx timeouts apply per phase (connect, write, each
+  read), not in total. Every outbound request is therefore also wrapped in
+  `asyncio.timeout(deadline.timeout(per_attempt))`, so wall-clock time is bounded too.
 - Limits (§5.4): model calls/turn 5; tool calls/turn 4; turns/conversation 30; `max_output_tokens` 800; turn
   deadline 45 s; LLM attempt 20 s; token count 10 s, no retry; billing attempt 3 s; billing tool total 8 s;
   billing GET retries ≤ 2 with backoff 200 ms / 600 ms + jitter; `HISTORY_MAX_TURNS` 6.
@@ -45,10 +47,29 @@ Compose.
 - **Fencing (§5.5).** Every write by a turn worker runs inside `fenced()`. There are exactly two unfenced
   exceptions, both keyed by their own row: the attempt-outcome transaction (`record_outcome`) and usage
   settlement (`settle`). Recovery writes use the caller's transaction, which already holds the conversation row
-  lock. The worker calls `assert_claim` (Task 8) immediately before every outbound request: token count,
-  generation, each billing attempt, and each retry. A pause can't carry a stale worker straight into an HTTP
-  send. The check-then-send gap is bounded by the 60 s lease; the conservative ledger (`uncertain`, never
-  released) covers what remains.
+  lock.
+- **Pre-send gate.** Immediately before every outbound request (token count, generation, each billing attempt,
+  each retry), the worker calls `pre_send(db, claim, deadline, checkpoints)` (Task 8). The gate does three things:
+  1. `assert_claim`: a DB check that raises `ClaimLost`.
+  2. `checkpoints.hit("after_claim_check")`, used only by tests.
+  3. A local check with no I/O: it raises `DeadlineExpired` unless `deadline.remaining() > 0`.
+
+  The request is then sent at once, bounded by the total timeout above.
+  - **Why the local check matters.** The turn `Deadline(45)` starts after the claim commits, and the lease
+    (60 s, DB time) starts at the claim. While the local deadline is unexpired, no takeover can have happened.
+    A request that starts before the deadline ends by it, which leaves 15 s of margin before the lease can
+    expire. A pause *before* the gate is therefore always caught: by `assert_claim` once a takeover has
+    happened, or by the local check once the deadline has passed.
+  - **Residual race (not closable here).** Suppose the whole process stalls for ≥ 15 s (lease − deadline)
+    after the local check passes and before the request completes: a SIGSTOP, VM suspend, or a blocked event
+    loop. A request can then go out, or still be in flight, after another worker has taken over. Closing that
+    gap requires the receiving service to check the fencing token, and neither OpenAI nor the billing API does.
+    A DB clock jump of ≥ 15 s has the same effect.
+  - **Consequences of the residual race.** At most one request per stale worker. A generation request's
+    reservation is still `reserved`, so recovery marks it `uncertain` and blocks live mode. A billing GET is
+    read-only, and its result is discarded because every write after it is fenced. A verify POST's outcome is
+    recorded by the unfenced attempt-outcome transaction, which counts failures and never grants assurance.
+  - The AC 13 compliance claim is limited accordingly (see Verification).
 
 ## Review Focus
 
@@ -505,7 +526,9 @@ class BillingClient:
 
   `guard` is awaited immediately before every HTTP attempt, including the first attempt and each retry (after the
   backoff sleep). Any exception it raises propagates unchanged, so the client never wraps it in `BillingError`.
-  The client stays claim-agnostic, and the executor (Task 10) passes `lambda: assert_claim(db, claim)`.
+  The client stays claim-agnostic, and the executor (Task 10) passes
+  `lambda: pre_send(db, claim, deadline, checkpoints)`. Each attempt is wrapped in
+  `asyncio.timeout(deadline.timeout(3))` (total, not per phase).
 
   Each call makes its own tool `Deadline(8)` capped by the turn deadline (`min` of both). The per-attempt timeout
   is 3 s. GETs retry ≤ 2 on timeout, 5xx or connection error, sleeping `base * (1 + 0.25 * rng())` with base
@@ -531,6 +554,7 @@ async def test_guard_runs_before_every_attempt(respx_mock, fake_sleep):
     guard = AsyncMock(side_effect=[None, ClaimLostStub()])        # second check fails
     with pytest.raises(ClaimLostStub): await client.get_account("cus_a", deadline=Deadline(45), guard=guard)
     assert route.call_count == 1 and guard.await_count == 2       # retry never sent
+async def test_attempt_total_time_bounded(respx_mock, fake_clock): ...   # trickling body (each read < 3 s) still cut at 3 s total
 async def test_sends_api_key_and_correlation_id(respx_mock): ...
 async def test_live_round_trip_against_mock_billing(billing_server): ...  # integration
 ```
@@ -558,12 +582,16 @@ async def try_claim(conn: AsyncConnection, conversation_id: UUID, turn_id: UUID,
 async def fenced(db: Database, claim: Claim) -> AsyncIterator[AsyncConnection]  # raises ClaimLost; rolls back
 async def release(conn: AsyncConnection, claim: Claim) -> None  # call inside fenced(); clears active_turn_*
 async def assert_claim(db: Database, claim: Claim) -> None       # fenced no-op; raises ClaimLost
+class DeadlineExpired(Exception): ...
+async def pre_send(db: Database, claim: Claim, deadline: Deadline, checkpoints: Checkpoints) -> None
 ```
 
 `try_claim` runs exactly the §5.5 conditional `UPDATE … RETURNING claim_version`. `fenced` opens a transaction and
 runs `SELECT 1 FROM support.conversations WHERE id=:c AND active_turn_id=:t AND claim_version=:v FOR UPDATE`.
-Zero rows → rollback and `ClaimLost`. `assert_claim` is `async with fenced(db, claim): pass`. Workers call it
-right before every outbound request (Global Constraints, Fencing).
+Zero rows → rollback and `ClaimLost`. `assert_claim` is `async with fenced(db, claim): pass`. `pre_send` is
+`assert_claim` → `checkpoints.hit("after_claim_check")` → `if deadline.remaining() <= 0: raise DeadlineExpired`
+(Global Constraints, Pre-send gate). Callers send immediately after it returns; no `await` sits between the
+gate and the request. Settings validation asserts `TURN_DEADLINE_S < TURN_LEASE_S` at startup.
 
 - [ ] **Step 1: Write failing tests**
 
@@ -589,6 +617,16 @@ async def test_assert_claim_after_takeover(db, conversation):
     first = await claim_in_tx(db, conversation, uuid4()); await assert_claim(db, first)   # no exception
     await expire_lease(db, conversation); await claim_in_tx(db, conversation, uuid4())
     with pytest.raises(ClaimLost): await assert_claim(db, first)
+
+async def test_pre_send_local_gate_catches_stall_after_db_check(db, conversation, fake_clock, pause_at):
+    claim = await claim_in_tx(db, conversation, uuid4()); deadline = Deadline(45, clock=fake_clock)
+    gate = pause_at("after_claim_check")
+    t = asyncio.create_task(pre_send(db, claim, deadline, gate.checkpoints)); await gate.reached.wait()
+    fake_clock.advance(46)                      # stall past the deadline, after the DB check passed
+    gate.release()
+    with pytest.raises(DeadlineExpired): await t
+
+def test_settings_reject_deadline_not_below_lease(): ...   # TURN_DEADLINE_S=60, TURN_LEASE_S=60 → ValidationError
 ```
 
 `expire_lease` is a test helper (`UPDATE … SET active_turn_lease_expires_at = now() - interval '1 second'`), shared
@@ -712,7 +750,8 @@ and the trace's error code is `verification_expired`, so `AgentCore` can choose 
 before verify is sent, the executor records no outcome. The slot stays `in_flight` until recovery marks it
 `abandoned` (§5.5 step 4), so no counter changes. If the claim is lost after verify, the executor raises
 `ClaimLost` after recording the outcome. Every billing call passes
-`claim_guard = lambda: assert_claim(db, ctx.claim)`. `get_account_summary` exposes only `neighborhood` and `city` from the address. The
+`claim_guard = lambda: pre_send(db, ctx.claim, ctx.deadline, ctx.checkpoints)`. `DeadlineExpired` from the
+guard maps to `upstream_timeout`, the same as a billing deadline expiry. `get_account_summary` exposes only `neighborhood` and `city` from the address. The
 executor writes a `tool_calls` row through `fenced`. Unknown tool name → `invalid_arguments`.
 
 - [ ] **Step 1: Write failing tests**
@@ -1031,13 +1070,21 @@ def format_date(d: date) -> str             # "05/11/2026"
 
 - `ScriptedModel.count_input_tokens` returns the local estimate and sends nothing. `generate` is deterministic and
   reads only `request.input`. A tool output's tool name and arguments come from the `function_call` item with the
-  same `call_id`. "Bill intent" means the text matches `fatura|conta|boleto|pagar|débito|vencimento`. The
-  requested status comes from that text: "aberto" → `open`, "atrasad" → `overdue`, "pag" → `paid`, else none.
+  same `call_id`. "Bill intent" means the text matches `fatura|conta|boleto|pagar|débito|vencimento`. A text that
+  satisfies rule 3 (credentials) never counts as bill intent, so "número da conta 1234567890…" can't override an
+  earlier request. `bill_status(text) -> str | None` (module-level, case-insensitive, accent-insensitive) maps
+  the text to a requested status. It returns a status only when exactly one category matches; zero or several
+  give `None`:
+  - `open`: `\babert[oa]s?\b` (covers "em aberto", "abertas")
+  - `overdue`: `\batras(o|ad[oa]s?)\b|\bvencid[oa]s?\b` (covers "em atraso", "atrasadas", "vencidas")
+  - `paid`: `\bpag[oa]s?\b|\bquitad[oa]s?\b` ("pagas", "pagos"; **not** "pagar"/"pagamento", which are intent
+    to pay an open bill)
+
   The rules are checked in this order, and the first match wins:
   1. **Authentication succeeded.** The last item is an `authenticate_customer` output with `"status": "ok"`.
-     If either of the last two `user_message` items in `request.input` has bill intent, call `list_bills` with
-     the status from the newer of the two. Otherwise, confirm verification and offer help. This rule must stay ahead of
-     rule 2, because rule 2 matches every tool output.
+     Among the last two `user_message` items in `request.input`, take the newest one **with bill intent**.
+     If there is one, call `list_bills` with `bill_status` of that message. Otherwise, confirm verification
+     and offer help. This rule must stay ahead of rule 2, because rule 2 matches every tool output.
   2. **Any other tool output** → summarize it in PT-BR. Bills: count, open/overdue first, amounts with
      `format_brl`, due dates with `format_date`. An empty list reflects the status in the paired call's
      arguments: `open` → "Não encontrei faturas em aberto.", `overdue` → "Não encontrei faturas em atraso.",
@@ -1073,6 +1120,19 @@ async def test_auth_success_leads_to_bill_lookup():                     # rule 1
         call("c1", "authenticate_customer"), output("c1", '{"untrusted_data": {"first_name": "Ana"}, "status": "ok"}')), ctx)
     assert r.text is None and r.function_calls[0].name == "list_bills"
     assert json.loads(r.function_calls[0].arguments) == {"status": "open"}
+
+async def test_credentials_mentioning_conta_keep_earlier_status():      # creds message is not bill intent
+    creds = "número da conta 1234567890, nasci em 01/02/1980, telefone 4321"
+    r = await ScriptedModel().generate(req(user("faturas em atraso"), assistant_ask(), user(creds),
+        call("c1", "authenticate_customer"), output("c1", AUTH_OK)), ctx)
+    assert json.loads(r.function_calls[0].arguments) == {"status": "overdue"}
+
+@pytest.mark.parametrize("text,status", [
+    ("faturas em aberto", "open"), ("minhas contas abertas", "open"),
+    ("faturas em atraso", "overdue"), ("contas atrasadas", "overdue"), ("boletos vencidos", "overdue"),
+    ("faturas pagas", "paid"), ("contas já quitadas", "paid"),
+    ("quero pagar minha conta", None), ("minhas faturas", None), ("faturas abertas e atrasadas", None)])
+def test_bill_status_parser(text, status): assert bill_status(text) == status
 
 async def test_auth_then_lookup_then_summary_sequence():                # full scripted chain, one turn
     inp = [user("minhas faturas"), assistant_ask(), user(CREDS)]
@@ -1360,16 +1420,20 @@ async def test_takeover_during_after_verify_admit_sends_no_verify(api_fake_model
   `build_count_body(req) -> dict` and `build_generation_body(req) -> dict`. Both bodies come from one builder.
   Generation adds `max_output_tokens`, `store=False`, `service_tier`, `include=["reasoning.encrypted_content"]`.
   Shared fields: `model`, `instructions`, `input`, `tools`, `tool_choice="auto"`.
-- `count_input_tokens`: `await assert_claim(db, ctx.claim)`, then `POST /v1/responses/input_tokens` with timeout
-  `deadline.timeout(10)`, no retry. `ClaimLost` propagates. Any other failure raises
-  `ModelUnavailable("upstream_unavailable")`. Not ledgered as spend (the gate guarantees it is unbilled).
+- `count_input_tokens`: `await pre_send(db, ctx.claim, ctx.deadline, ctx.checkpoints)`, then
+  `POST /v1/responses/input_tokens` with timeout `deadline.timeout(10)` inside
+  `asyncio.timeout(deadline.timeout(10))`, no retry. `ClaimLost` propagates. `DeadlineExpired` →
+  `ModelUnavailable("limit_reached")`. Any other failure raises `ModelUnavailable("upstream_unavailable")`. Not ledgered as spend (the gate guarantees it is unbilled).
 - `generate`, per attempt (the first attempt and the single retry follow the same steps):
   1. `reserve` (fenced) for `worst_case_usd`; `BudgetExceeded` → `ModelUnavailable("live_blocked")`.
   2. `checkpoints.hit("after_reserve")`.
-  3. `await assert_claim(db, ctx.claim)` immediately before sending. On `ClaimLost`, nothing is sent. The
-     reservation stays `reserved` for recovery (`recover_reservations` → `uncertain`), and `ClaimLost`
-     propagates.
-  4. Send with timeout `deadline.timeout(20)`, then `checkpoints.hit("after_send")`.
+  3. `await pre_send(db, ctx.claim, ctx.deadline, ctx.checkpoints)` immediately before sending. On
+     `ClaimLost`, nothing is sent. The reservation stays `reserved` for recovery
+     (`recover_reservations` → `uncertain`), and `ClaimLost` propagates. On `DeadlineExpired`, nothing is
+     sent. The worker still holds its claim, so it releases the reservation (fenced) and raises
+     `ModelUnavailable("limit_reached")`.
+  4. Send with `timeout=deadline.timeout(20)` inside `asyncio.timeout(deadline.timeout(20))`, then
+     `checkpoints.hit("after_send")`.
   5. Classify the outcome, then apply the ledger. With usage → `settle` (unfenced, so it applies even after
      `ClaimLost`). Otherwise → `release` or `mark_uncertain` inside `fenced`. If that raises `ClaimLost`, the row
      is left to recovery and `ClaimLost` propagates.
@@ -1428,6 +1492,16 @@ async def test_takeover_during_after_reserve_sends_no_generation(api_live_mocked
     assert b.json()["reply"] == MESSAGES["live_blocked"]
     call = await only_llm_call(support_db, kind="generation")
     assert call.status == "uncertain" and call.reserved_usd > 0         # conservative: never released
+```
+
+```python
+async def test_stall_after_claim_check_sends_no_generation(api_live_mocked, support_db, pause_at, fake_clock):
+    gate = pause_at("after_claim_check", turn=1, nth=2)   # the generation's gate (the 1st is the count's)
+    a = asyncio.create_task(api_live_mocked.send(uuid4(), "minhas faturas")); await gate.reached.wait()
+    fake_clock.advance(61); await expire_lease(support_db, api_live_mocked.conversation_id)
+    await api_live_mocked.send(uuid4(), "outra pergunta")              # takeover
+    gate.release(); assert (await a).json()["status"] == "interrupted"
+    assert api_live_mocked.openai_routes["responses"].call_count == 0   # local gate refused the send
 ```
 
 The `after_reserve` test lives in `test_openai_model.py`. It needs `api_live_mocked`, so it runs after the
@@ -1621,4 +1695,6 @@ Also run:
   - `grep -E '^(LIVE_LLM_ENABLED|OPENAI_API_KEY)=' .env.example` → `LIVE_LLM_ENABLED=false` and `OPENAI_API_KEY=`.
   - The network-guard fixture is autouse in `services/support_api/tests/conftest.py`.
 - **Milestone report:** state that the OpenAI path is tested only against mocked HTTP and was not executed live
-  (AC 20), and list the open §8 live-gate prerequisites.
+  (AC 20), and list the open §8 live-gate prerequisites. Claim AC 13 only under its rev 4 wording. Name the
+  tested pause points (`after_model_response`, `after_reserve`, `after_verify_admit`, `after_claim_check` with
+  expired deadline), and restate the §5.5 residual stall race as open.
