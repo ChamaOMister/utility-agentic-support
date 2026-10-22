@@ -76,9 +76,7 @@ class TurnOutcome:
     status: Literal["completed", "failed"]
     reply: str
     trace: dict  # {"tool_calls": [...], "model_calls": [...]}
-    final_items: tuple[
-        dict, ...
-    ]  # final response's non-message items; () for catalog endings
+    final_items: tuple[dict, ...]  # final response's reasoning items; () for catalog endings
 
 
 class _End(Exception):
@@ -226,10 +224,11 @@ class AgentCore:
                     status="completed",
                     reply=reply,
                     trace=self._trace(tool_traces, ctx),
+                    # Only reasoning: a stray tool item would break the next turn's pairing.
                     final_items=tuple(
                         i
                         for i in response.output_items
-                        if i.get("type") != "message" and not _has_nul(i)
+                        if i.get("type") == "reasoning" and not _has_nul(i)
                     ),
                 )
 

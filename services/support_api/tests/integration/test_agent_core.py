@@ -324,6 +324,17 @@ async def test_output_items_persisted_in_order(
     assert interim not in follow_up
 
 
+async def test_final_items_keep_only_reasoning(make_core, verified_turn):
+    """M3: a stray tool item in a final response is not a final item (it would poison history)."""
+    stray = {"type": "function_call_output", "call_id": "ghost", "output": "{}"}
+    fake = QueuedFakeModel(
+        [text_response("Certo!", extra=(reasoning("r1"), stray, msg("user", "x")))]
+    )
+    outcome = await handle(make_core(fake), verified_turn)
+    assert outcome.status == "completed" and outcome.reply == "Certo!"
+    assert outcome.final_items == (reasoning("r1"),)
+
+
 async def test_core_never_writes_assistant_message(
     make_core, db, verified_turn, billing_mock
 ):

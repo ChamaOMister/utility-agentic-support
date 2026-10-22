@@ -30,8 +30,9 @@ from support_api.turns.recovery import assistant_payload, recover_conversation
 logger = logging.getLogger("support_api.turns")
 
 EMPTY_TRACE: dict[str, list] = {"tool_calls": [], "model_calls": []}
-# Final-response items stored before the assistant message; anything else is not a stored kind.
-_FINAL_ITEM_KINDS = frozenset({"reasoning", "function_call", "function_call_output"})
+# Final-response items stored before the assistant message. Only reasoning: a final response
+# has no calls, so a stray tool item stored here would fail the next turn's pairing check.
+_FINAL_ITEM_KINDS = frozenset({"reasoning"})
 
 
 @dataclass
@@ -290,8 +291,7 @@ async def _complete(
             seq,
             kind,
             json.dumps(item, ensure_ascii=False),
-            call_id=item.get("call_id") if kind != "reasoning" else None,
-            model=model_name if kind == "reasoning" else None,
+            model=model_name,
         )
         seq += 1
     await _insert_item(

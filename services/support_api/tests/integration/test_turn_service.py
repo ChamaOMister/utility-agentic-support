@@ -5,10 +5,13 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text as sql_text
+from support_api.agent.core import TurnOutcome
 from support_api.agent.models.base import ModelResponse
 from support_api.agent.models.scripted import ASK_VERIFICATION, GREETING
 from support_api.app import create_app
 from support_api.catalog import MESSAGES
+from support_api.turns.claim import fenced
+from support_api.turns.service import EMPTY_TRACE, _complete
 from support_api.usage.pricing import LiveGateClosed
 
 from tests.conftest import (
@@ -162,6 +165,33 @@ async def test_model_reply_of_only_nul_is_limit_reached(api_fake_model, db):
     assert r.json()["reply"] == MESSAGES["limit_reached"]
     (row,) = await turns(db, api.conversation_id)
     assert row.status == "failed"
+
+
+async def test_complete_stores_only_reasoning_final_items(db, claimed_conversation):
+    """M3: _complete stores reasoning, never a stray function_call/function_call_output."""
+    claim = claimed_conversation
+    final_items = (
+        {"type": "reasoning", "id": "r1", "summary": [], "encrypted_content": "enc"},
+        {"type": "function_call_output", "call_id": "ghost", "output": "{}"},
+        {"type": "function_call", "call_id": "ghost2", "name": "x", "arguments": "{}"},
+    )
+    outcome = TurnOutcome("completed", "Certo!", EMPTY_TRACE, final_items)
+    async with fenced(db, claim) as conn:
+        await _complete(conn, claim, outcome, "queued-fake")
+    assert await items_for(db, claim.turn_id) == ["reasoning", "assistant_message"]
+
+
+async def test_stray_tool_output_does_not_poison_next_turn(api_fake_model, db):
+    """M3 end to end: the next turn's history check passes and the turn completes."""
+    api = api_fake_model
+    stray = {"type": "function_call_output", "call_id": "ghost", "output": "{}"}
+    api.model.push(_final("Primeira.", stray), _final("Segunda."))
+    first = await api.send(uuid4(), "olá")
+    second = await api.send(uuid4(), "e agora?")
+    assert first.json()["status"] == second.json()["status"] == "completed"
+    assert second.json()["reply"] == "Segunda."
+    rows = await turns(db, api.conversation_id)
+    assert await items_for(db, rows[0].id) == ["user_message", "assistant_message"]
 
 
 async def test_turn_limit_30(api, db):
