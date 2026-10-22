@@ -189,6 +189,7 @@ async def client(settings):
     app, http = await _client_for(settings)
     async with http:
         yield http
+    await app.state.billing.aclose()
     await app.state.db.engine.dispose()
 
 
@@ -199,6 +200,7 @@ async def client_demo_off(settings):
     )
     async with http:
         yield http
+    await app.state.billing.aclose()
     await app.state.db.engine.dispose()
 
 
@@ -224,6 +226,7 @@ async def _make_app(settings):
 async def _close_app(app) -> None:
     for http in app.state.test_clients:
         await http.aclose()
+    await app.state.billing.aclose()
     await app.state.db.engine.dispose()
 
 
@@ -475,16 +478,37 @@ class PauseGate:
         self._release.set()
 
 
+class CheckpointHub(Checkpoints):
+    """The app-level checkpoints of the turn API fixtures: forwards every hit to the checkpoints
+    registered by ``pause_at`` / ``crash_at`` during the test, in registration order."""
+
+    def __init__(self) -> None:
+        self.targets: list[Checkpoints] = []
+
+    async def hit(self, name: str) -> None:
+        for target in list(self.targets):
+            await target.hit(name)
+
+
 @pytest.fixture
-def pause_at():
+def checkpoint_hub() -> CheckpointHub:
+    return CheckpointHub()
+
+
+@pytest.fixture
+def pause_at(checkpoint_hub):
+    """Also registered with ``checkpoint_hub``, so a gate made inside a test reaches the app."""
+
     def make(name: str, *, nth: int = 1) -> PauseGate:
-        return PauseGate(name, nth)
+        gate = PauseGate(name, nth)
+        checkpoint_hub.targets.append(gate.checkpoints)
+        return gate
 
     return make
 
 
 @pytest.fixture
-def crash_at():
+def crash_at(checkpoint_hub):
     def make(name: str, *, nth: int = 1) -> Checkpoints:
         class _Crashing(Checkpoints):
             def __init__(self) -> None:
@@ -497,7 +521,9 @@ def crash_at():
                 if self.hits == nth:
                     raise SimulatedCrash(f"simulated crash at {name} (hit {nth})")
 
-        return _Crashing()
+        crashing = _Crashing()
+        checkpoint_hub.targets.append(crashing)
+        return crashing
 
     return make
 
@@ -791,3 +817,404 @@ async def project_cap_small(db):
                 ),
                 {"c": original},
             )
+
+
+# ---------------------------------------------------------------------------
+# Turn API (Task 17): app + client + one conversation, billing mocked with respx, model control.
+# ---------------------------------------------------------------------------
+TEST_HASH_KEY = (
+    b"test-hash-key"  # the identifier_hash_key of the test settings, as bytes
+)
+BILLING_TEST_URL = "http://billing.test"  # the billing_base_url of the test settings
+_BILL_SUMMARY_FIELDS = (
+    "bill_id", "installation_id", "reference_month", "due_date", "amount_brl", "status",
+    "consumption_kwh", "tariff_flag",
+)  # fmt: skip
+
+
+def persona_hash(persona: dict) -> str:
+    """The identifier lockout key the executor stores for ``persona``'s CPF."""
+    from support_api.identity.normalize import lockout_key, normalize
+
+    normalized = normalize(persona["cpf"])
+    assert normalized is not None
+    return lockout_key(normalized, TEST_HASH_KEY)
+
+
+def persona_creds_text(persona: dict) -> str:
+    """A PT-BR message carrying ``persona``'s credentials, as a customer would type it."""
+    cpf = persona["cpf"]
+    y, m, d = persona["birth_date"].split("-")
+    formatted = f"{cpf[:3]}.{cpf[3:6]}.{cpf[6:9]}-{cpf[9:]}"
+    return (
+        f"CPF {formatted}, nasci em {d}/{m}/{y}, telefone final {persona['phone'][-4:]}"
+    )
+
+
+def fake_call(call_id: str, name: str, args: dict | None = None):
+    """A ModelResponse with one function call (QueuedFakeModel queue entry)."""
+    from support_api.agent.models.base import FunctionCall, ModelResponse
+
+    arguments = json.dumps(args or {})
+    item = {
+        "type": "function_call",
+        "call_id": call_id,
+        "name": name,
+        "arguments": arguments,
+    }
+    return ModelResponse(
+        "completed", None, (FunctionCall(call_id, name, arguments),), (item,)
+    )
+
+
+def fake_text(reply: str):
+    """A ModelResponse with final assistant text (QueuedFakeModel queue entry)."""
+    from support_api.agent.models.base import ModelResponse
+
+    msg = {"type": "message", "role": "assistant", "content": reply}
+    return ModelResponse("completed", reply, (), (msg,))
+
+
+class BillingGate:
+    """Holds the verify route: ``hold()`` makes the next verify requests wait for ``release()``.
+
+    ``request_seen`` is set when a held request arrives. ``hold(response=...)`` replaces the JSON
+    the held request answers with (default: the route's normal persona check).
+    """
+
+    def __init__(self) -> None:
+        self.held = False
+        self.response: dict | None = None
+        self.request_seen = asyncio.Event()
+        self._release = asyncio.Event()
+
+    def hold(self, response: dict | None = None) -> None:
+        self.held = True
+        self.response = response
+
+    def release(self) -> None:
+        self._release.set()
+
+    async def wait(self) -> None:
+        self.request_seen.set()
+        await asyncio.wait_for(self._release.wait(), 10)
+
+
+@pytest.fixture
+def billing_gate() -> BillingGate:
+    return BillingGate()
+
+
+@pytest.fixture
+def billing_mock(personas, billing_gate):
+    """respx routes for the billing contract on ``BILLING_TEST_URL``, answering from the personas.
+
+    Route names: ``verify``, ``list_bills``, ``get_account``.
+    """
+    import respx
+
+    by_ref = {p["customer_ref"]: p for p in personas}
+
+    def check(body: dict) -> dict:
+        for p in personas:
+            if (
+                body.get("identifier") in (p["cpf"], p["account_number"])
+                and body.get("birth_date") == p["birth_date"]
+                and body.get("phone_last4") == p["phone"][-4:]
+            ):
+                return {
+                    "verified": True,
+                    "customer_ref": p["customer_ref"],
+                    "first_name": p["first_name"],
+                }
+        return {"verified": False}
+
+    async def verify(request):
+        body = json.loads(request.content)
+        if billing_gate.held:
+            await billing_gate.wait()
+            if billing_gate.response is not None:
+                return httpx.Response(200, json=billing_gate.response)
+        return httpx.Response(200, json=check(body))
+
+    def list_bills(request, ref):
+        persona = by_ref.get(ref)
+        if persona is None:
+            return httpx.Response(404, json={"error": "not_found"})
+        status = request.url.params.get("status")
+        bills = [
+            {k: b[k] for k in _BILL_SUMMARY_FIELDS}
+            for b in persona["bills"]
+            if status is None or b["status"] == status
+        ]
+        return httpx.Response(200, json=bills)
+
+    def get_account(request, ref):
+        persona = by_ref.get(ref)
+        if persona is None:
+            return httpx.Response(404, json={"error": "not_found"})
+        cpf = persona["cpf"]
+        return httpx.Response(
+            200,
+            json={
+                "customer_ref": ref,
+                "masked_cpf": f"***.{cpf[3:6]}.{cpf[6:9]}-**",
+                "installations": persona["installations"],
+                "address": persona["address"],
+                "tariff_class": persona["tariff_class"],
+                "account_status": persona["account_status"],
+            },
+        )
+
+    with respx.mock(base_url=BILLING_TEST_URL, assert_all_called=False) as router:
+        router.post("/v1/identity/verify", name="verify").mock(side_effect=verify)
+        router.get(
+            path__regex=r"^/v1/customers/(?P<ref>[A-Za-z0-9_-]+)/bills$",
+            name="list_bills",
+        ).mock(side_effect=list_bills)
+        router.get(
+            path__regex=r"^/v1/customers/(?P<ref>[A-Za-z0-9_-]+)/account$",
+            name="get_account",
+        ).mock(side_effect=get_account)
+        yield router
+
+
+class SlowGate:
+    """Makes the counting scripted model wait inside ``generate`` until ``release()``."""
+
+    def __init__(self) -> None:
+        self.entered = asyncio.Event()
+        self._release = asyncio.Event()
+
+    async def wait(self) -> None:
+        self.entered.set()
+        await asyncio.wait_for(self._release.wait(), 10)
+
+    def release(self) -> None:
+        self._release.set()
+
+
+class CountingScriptedModel:
+    """``ScriptedModel`` that counts generation requests and can be held by a ``SlowGate``."""
+
+    name = "scripted"
+    live = False
+
+    def __init__(self) -> None:
+        from support_api.agent.models.scripted import ScriptedModel
+
+        self._inner = ScriptedModel()
+        self.requests_count = 0
+        self.slow: SlowGate | None = None
+
+    async def count_input_tokens(self, request, ctx) -> int:
+        return await self._inner.count_input_tokens(request, ctx)
+
+    async def generate(self, request, ctx):
+        self.requests_count += 1
+        if self.slow is not None:
+            await self.slow.wait()
+        return await self._inner.generate(request, ctx)
+
+
+class TurnApi:
+    """An httpx client (own cookie jar) bound to the app, plus one conversation it owns."""
+
+    def __init__(self, app, http, conversation_id, model, billing_routes) -> None:
+        self.app = app
+        self.http = http
+        self.conversation_id = conversation_id
+        self.model = model
+        self.billing_routes = billing_routes
+
+    async def send(self, mid, text: str) -> httpx.Response:
+        return await self.http.post(
+            f"/api/conversations/{self.conversation_id}/messages",
+            json={"client_message_id": str(mid), "text": text},
+            headers=ORIGIN,
+        )
+
+    async def transcript(self) -> httpx.Response:
+        return await self.http.get(f"/api/conversations/{self.conversation_id}")
+
+
+async def _turn_api(settings, model, checkpoint_hub, billing_mock):
+    from support_api.app import create_app
+
+    app = create_app(settings, model=model, checkpoints=checkpoint_hub)
+    http = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="https://support.test"
+    )
+    r = await http.post("/api/conversations", json={}, headers=ORIGIN)
+    assert r.status_code == 201
+    cid = uuid.UUID(r.json()["conversation_id"])
+    return TurnApi(app, http, cid, model, billing_mock)
+
+
+async def _close_turn_api(api: TurnApi) -> None:
+    await api.http.aclose()
+    await api.app.state.billing.aclose()
+    await api.app.state.db.dispose()
+
+
+@pytest_asyncio.fixture
+async def api(db, settings, checkpoint_hub, billing_mock):
+    """Turn API with the (counting) scripted model and respx billing."""
+    api = await _turn_api(
+        settings, CountingScriptedModel(), checkpoint_hub, billing_mock
+    )
+    yield api
+    await _close_turn_api(api)
+
+
+@pytest.fixture
+def slow_model(api) -> SlowGate:
+    """Holds ``api``'s model inside its first ``generate`` until ``release()``."""
+    gate = SlowGate()
+    api.model.slow = gate
+    return gate
+
+
+@pytest_asyncio.fixture
+async def api_fake_model(db, settings, checkpoint_hub, billing_mock):
+    """Turn API with an empty ``QueuedFakeModel``; tests ``push`` the responses each turn needs."""
+    from support_api.agent.models.fake import QueuedFakeModel
+
+    api = await _turn_api(settings, QueuedFakeModel([]), checkpoint_hub, billing_mock)
+    yield api
+    await _close_turn_api(api)
+
+
+@pytest_asyncio.fixture
+async def api_verified_fake_model(api_fake_model, db, personas):
+    """``api_fake_model`` whose conversation is already verified as persona A (kba, 30 min)."""
+    from sqlalchemy import text
+
+    a = personas[0]
+    async with db.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO support.conversation_auth "
+                "(conversation_id, assurance_level, customer_ref, first_name, verified_at, "
+                " verified_expires_at) "
+                "VALUES (:c, 'kba', :r, :n, now(), now() + interval '30 minutes')"
+            ),
+            {
+                "c": api_fake_model.conversation_id,
+                "r": a["customer_ref"],
+                "n": a["first_name"],
+            },
+        )
+    return api_fake_model
+
+
+# Turn DB helpers (Task 17).
+def turn_id(response: httpx.Response) -> uuid.UUID:
+    return uuid.UUID(response.json()["turn_id"])
+
+
+async def turns(db, conversation_id):
+    """Turn rows of the conversation, oldest first."""
+    from sqlalchemy import text
+
+    async with db.begin() as conn:
+        return (
+            await conn.execute(
+                text(
+                    "SELECT * FROM support.turns WHERE conversation_id = :c "
+                    "ORDER BY created_at, id"
+                ),
+                {"c": _cid(conversation_id)},
+            )
+        ).all()
+
+
+async def turn_by_mid(db, client_message_id):
+    from sqlalchemy import text
+
+    async with db.begin() as conn:
+        return (
+            await conn.execute(
+                text("SELECT * FROM support.turns WHERE client_message_id = :m"),
+                {"m": client_message_id},
+            )
+        ).one()
+
+
+async def items_for(db, turn_id) -> list[str]:
+    """Item kinds of one turn, in ``seq`` order."""
+    from sqlalchemy import text
+
+    async with db.begin() as conn:
+        return list(
+            (
+                await conn.execute(
+                    text(
+                        "SELECT kind FROM support.conversation_items "
+                        "WHERE turn_id = :t ORDER BY seq"
+                    ),
+                    {"t": turn_id},
+                )
+            ).scalars()
+        )
+
+
+async def item_turn_ids(db, conversation_id) -> set:
+    """Every turn id that owns at least one item in the conversation."""
+    from sqlalchemy import text
+
+    async with db.begin() as conn:
+        return set(
+            (
+                await conn.execute(
+                    text(
+                        "SELECT DISTINCT turn_id FROM support.conversation_items "
+                        "WHERE conversation_id = :c"
+                    ),
+                    {"c": _cid(conversation_id)},
+                )
+            ).scalars()
+        )
+
+
+async def conv_auth(db, conversation_id):
+    from sqlalchemy import text
+
+    async with db.begin() as conn:
+        return (
+            await conn.execute(
+                text(
+                    "SELECT * FROM support.conversation_auth WHERE conversation_id = :c"
+                ),
+                {"c": _cid(conversation_id)},
+            )
+        ).one()
+
+
+async def last_attempt(db, conversation_id):
+    from sqlalchemy import text
+
+    async with db.begin() as conn:
+        return (
+            await conn.execute(
+                text(
+                    "SELECT * FROM support.verification_attempts WHERE conversation_id = :c "
+                    "ORDER BY created_at DESC, id LIMIT 1"
+                ),
+                {"c": _cid(conversation_id)},
+            )
+        ).one()
+
+
+async def identifier_row(db, identifier_hash):
+    from sqlalchemy import text
+
+    async with db.begin() as conn:
+        return (
+            await conn.execute(
+                text(
+                    "SELECT * FROM support.identifier_lockouts WHERE identifier_hash = :h"
+                ),
+                {"h": identifier_hash},
+            )
+        ).one()

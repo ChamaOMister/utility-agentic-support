@@ -27,6 +27,10 @@ class QueuedFakeModel:
         self.requests: list[ModelRequest] = []
         self.count_requests: list[ModelRequest] = []
 
+    def push(self, *responses: ModelResponse | Exception) -> None:
+        """Queue more responses (tests that drive several turns through one model)."""
+        self._queue.extend(responses)
+
     async def count_input_tokens(self, request: ModelRequest, ctx: ModelContext) -> int:
         self.count_requests.append(request)
         if self._token_count is not None:

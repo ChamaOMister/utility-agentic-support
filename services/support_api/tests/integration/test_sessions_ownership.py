@@ -55,7 +55,7 @@ async def test_foreign_and_nonexistent_are_indistinguishable(app):
     assert (await a.get(f"/api/conversations/{cid}")).status_code == 200
 
 
-async def test_owner_can_create_read_and_post_stub(app):
+async def test_owner_can_create_read_and_post(app):
     a = new_client(app)
     r = await a.post("/api/conversations", json={}, headers=ORIGIN)
     assert r.status_code == 201
@@ -63,12 +63,14 @@ async def test_owner_can_create_read_and_post_stub(app):
     assert str(uuid.UUID(cid)) == cid
     got = await a.get(f"/api/conversations/{cid}")
     assert got.status_code == 200 and got.json() == {"turns": []}
-    stub = await a.post(
+    posted = await a.post(
         f"/api/conversations/{cid}/messages",
         headers=ORIGIN,
         json={"client_message_id": str(uuid4()), "text": "oi"},
     )
-    assert stub.status_code == 501 and stub.json() == {"error": "not_implemented"}
+    assert posted.status_code == 200 and posted.json()["status"] == "completed"
+    listed = (await a.get(f"/api/conversations/{cid}")).json()["turns"]
+    assert [t["turn_id"] for t in listed] == [posted.json()["turn_id"]]
 
 
 async def test_cookie_attributes_and_hash_only(app, support_test_engine):

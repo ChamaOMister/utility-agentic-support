@@ -33,3 +33,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "requires_openai_model: needs OpenAIResponsesModel (Task 18); skipped until then",
+]

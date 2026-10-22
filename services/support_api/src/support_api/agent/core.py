@@ -122,6 +122,11 @@ class AgentCore:
         self._instructions = load_instructions(settings.system_prompt_path)
         self._tools = tuple(executor.tool_definitions())
 
+    @property
+    def model_name(self) -> str:
+        """The model's name, stored with the reasoning items of a final response."""
+        return self._model.name
+
     async def handle_turn(
         self,
         claim: Claim,
