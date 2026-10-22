@@ -184,7 +184,6 @@ class AgentCore:
         s = self._settings
         model_calls = 0
         tools_run = 0
-        verification_expired = False
         while True:
             if ctx.deadline.expired:
                 raise DeadlineExpired
@@ -202,7 +201,8 @@ class AgentCore:
             if not response.function_calls:
                 if not response.text:
                     raise _End("limit_reached")
-                if verification_expired:
+                # Only the latest tool result decides: re-verifying later in the turn clears it.
+                if tool_traces and tool_traces[-1].error_code == "verification_expired":
                     raise _End("verification_expired")
                 return TurnOutcome(
                     status="completed",
@@ -233,8 +233,6 @@ class AgentCore:
                 )
                 tools_run += 1
                 tool_traces.append(trace)
-                if trace.error_code == "verification_expired":
-                    verification_expired = True
                 output = {
                     "type": "function_call_output",
                     "call_id": fc.call_id,

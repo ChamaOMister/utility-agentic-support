@@ -351,6 +351,41 @@ async def test_expired_verification_uses_expired_message(
     assert route.call_count == 0
 
 
+async def test_reauthentication_in_same_turn_clears_expired_override(
+    make_core, db, verified_turn, billing_mock
+):
+    """The override follows the LAST tool trace: re-verifying mid-turn lets the answer through."""
+    route = bills_ok(billing_mock)
+    billing_mock.post("/v1/identity/verify").mock(
+        return_value=httpx.Response(
+            200, json={"verified": True, "customer_ref": "cus_a", "first_name": "Ana"}
+        )
+    )
+    await expire_verification(db, verified_turn)
+    creds = {
+        "identifier": "12345678909",
+        "birth_date": "1980-02-01",
+        "phone_last4": "4321",
+    }
+    fake = QueuedFakeModel(
+        [
+            calls_response(call("c1")),  # -> verification_expired
+            calls_response(call("c2", "authenticate_customer", creds)),
+            calls_response(call("c3")),  # -> ok
+            text_response("Não encontrei faturas em aberto."),
+        ]
+    )
+    outcome = await handle(make_core(fake), verified_turn)
+    assert [t["error_code"] for t in outcome.trace["tool_calls"]] == [
+        "verification_expired",
+        None,
+        None,
+    ]
+    assert route.call_count == 1
+    assert outcome.status == "completed"
+    assert outcome.reply == "Não encontrei faturas em aberto."
+
+
 async def test_live_blocked_conversation_sends_nothing(make_core, db, verified_turn):
     async with db.begin() as conn:
         await conn.execute(
