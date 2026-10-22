@@ -30,7 +30,7 @@ export async function sendMessage(conversationId, text, clientMessageId) {
     }
     const body = await response.json();
     const correlationId = response.headers.get('X-Correlation-ID');
-    if (response.status === 409) return {reply: body.message, status: 'conflict', correlationId};
+    if (response.status === 409) return {reply: body.message, status: 'conflict', correlationId, retryWithSameId: true};
     if (!response.ok) throw new ApiError(response.status, body);
     return {...body, correlationId, retryWithNewId: body.status === 'interrupted'};
   }

@@ -48,7 +48,7 @@ export default function App() {
     setTurns(previous => retryTurn ? previous.map(t => t.client_message_id === retryTurn.client_message_id ? turn : t) : [...previous, turn]);
     try {
       const result = await sendMessage(conversationId, text, id);
-      const completed = {...turn, ...result, retry: result.retryWithNewId ? 'new' : null};
+      const completed = {...turn, ...result, retry: result.retryWithNewId ? 'new' : result.retryWithSameId ? 'same' : null};
       setTurns(previous => previous.map(t => t.client_message_id === id ? completed : t));
     } catch (err) {
       const failed = {...turn, reply: err instanceof ApiError ? ui.unavailable : ui.network_error,

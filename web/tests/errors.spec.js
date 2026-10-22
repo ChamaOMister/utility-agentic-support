@@ -95,3 +95,40 @@ test('exhausted network retry stays recoverable and keeps the original id', asyn
   expect(new Set(requests.map(r => r.client_message_id)).size).toBe(1);
   await expect(page.getByTestId('user-message')).toHaveCount(1);
 });
+
+test('lost response followed by in-progress replay keeps same-id recovery available', async ({ page }) => {
+  const requests = [];
+  let originalRequest;
+  await page.route('**/messages', async route => {
+    requests.push(route.request().postDataJSON());
+    if (requests.length === 1) {
+      // Drop the browser connection while its independent API request is still running.
+      originalRequest = route.fetch();
+      return route.abort('connectionreset');
+    }
+    if (requests.length <= 3) {
+      // Deterministically emulate an active original turn on automatic and explicit replay.
+      return fulfill(route, {error: 'turn_in_progress', message: inProgress}, 409);
+    }
+    await originalRequest;
+    return route.continue(); // The real API must replay the completed original turn.
+  });
+  await page.goto('/');
+  await send(page, 'Quero ver minhas faturas');
+  await expect(lastReply(page)).toHaveText(inProgress);
+  expect(requests).toHaveLength(2);
+  const retry = page.getByRole('button', {name: 'Tentar novamente', exact: true});
+  await expect(retry).toBeVisible();
+  await retry.click();
+  await expect(lastReply(page)).toHaveText(inProgress);
+  await expect(retry).toBeVisible();
+  await retry.click();
+  await expect(lastReply(page)).toContainText('CPF');
+  expect(requests).toHaveLength(4);
+  for (const request of requests) expect(request).toEqual(requests[0]);
+  await expect(page.getByTestId('user-message')).toHaveCount(1);
+  await page.reload();
+  await expect(page.getByTestId('user-message')).toHaveCount(1);
+  await expect(page.getByTestId('assistant-reply')).toHaveCount(1);
+  await expect(lastReply(page)).toContainText('CPF');
+});
