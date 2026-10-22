@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 import time
@@ -8,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from .auth import ApiError
 from .db import make_engine
+from .faults import admin_router
 from .routes import router
 from .settings import Settings
 
@@ -26,6 +28,8 @@ def create_app(settings: Settings) -> FastAPI:
     app = FastAPI(title="Mock billing (synthetic data)", lifespan=lifespan)
     app.state.settings = settings
     app.state.engine = engine
+    app.state.faults = []  # in-process fault rules (see faults.py)
+    app.state.sleep = asyncio.sleep  # injectable so tests need not wait out `timeout`
 
     @app.exception_handler(ApiError)
     async def api_error_handler(_: Request, exc: ApiError) -> JSONResponse:
@@ -37,7 +41,15 @@ def create_app(settings: Settings) -> FastAPI:
         supplied = request.headers.get("x-correlation-id", "")
         correlation_id = supplied if _CORRELATION_RE.fullmatch(supplied) else "-"
         started = time.monotonic()
-        response = await call_next(request)
+        status = 500  # logged if call_next raises, so a failing request still gets its line
+        try:
+            response = await call_next(request)
+            status = response.status_code
+        finally:
+            _log_request(request, correlation_id, status, started)
+        return response
+
+    def _log_request(request: Request, correlation_id: str, status: int, started: float) -> None:
         route = request.scope.get("route")
         # Allowlisted fields only: never payloads, identifiers or path parameters.
         logger.info(
@@ -45,14 +57,15 @@ def create_app(settings: Settings) -> FastAPI:
             correlation_id,
             request.method,
             getattr(route, "path", "-"),
-            response.status_code,
+            status,
             (time.monotonic() - started) * 1000,
         )
-        return response
 
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
     app.include_router(router)
+    if settings.fault_injection_enabled:
+        app.include_router(admin_router)
     return app

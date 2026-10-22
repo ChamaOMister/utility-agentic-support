@@ -9,11 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from .auth import ApiError, require_api_key
 from .db import get_conn
+from .faults import apply_faults
 from .models import bill_line_items, bills, customers, installations
 
 BillStatus = Literal["open", "paid", "overdue"]
 
-router = APIRouter(prefix="/v1", dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/v1", dependencies=[Depends(require_api_key), Depends(apply_faults)])
 Conn = Annotated[AsyncConnection, Depends(get_conn)]
 
 
@@ -92,7 +93,7 @@ def _digits(value: str) -> str:
     return "".join(ch for ch in value if ch.isascii() and ch.isdigit())
 
 
-@router.post("/identity/verify", response_model=VerifyResponse, response_model_exclude_none=True)
+@router.post("/identity/verify", name="verify", response_model=VerifyResponse, response_model_exclude_none=True)
 async def verify(body: VerifyRequest, conn: Conn) -> VerifyResponse:
     digits = _digits(body.identifier)
     column = {11: customers.c.cpf, 10: customers.c.account_number}.get(len(digits))
@@ -112,7 +113,7 @@ async def _customer(conn: AsyncConnection, ref: str):
     return row
 
 
-@router.get("/customers/{ref}/account", response_model=Account)
+@router.get("/customers/{ref}/account", name="account", response_model=Account)
 async def get_account(ref: str, conn: Conn) -> Account:
     c = await _customer(conn, ref)
     insts = (
@@ -132,7 +133,7 @@ async def get_account(ref: str, conn: Conn) -> Account:
     )
 
 
-@router.get("/customers/{ref}/bills", response_model=list[BillSummary])
+@router.get("/customers/{ref}/bills", name="list_bills", response_model=list[BillSummary])
 async def list_bills(
     ref: str,
     conn: Conn,
@@ -149,7 +150,7 @@ async def list_bills(
     return [_summary(r) for r in (await conn.execute(stmt)).all()]
 
 
-@router.get("/customers/{ref}/bills/{bill_id}", response_model=BillDetail)
+@router.get("/customers/{ref}/bills/{bill_id}", name="bill_detail", response_model=BillDetail)
 async def get_bill(ref: str, bill_id: str, conn: Conn) -> dict:
     # Ownership is enforced by path scoping: a bill of another customer is simply not found,
     # exactly like a nonexistent one.

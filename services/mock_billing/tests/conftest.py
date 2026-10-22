@@ -84,6 +84,41 @@ async def client(migrated_db):
     await app.state.engine.dispose()
 
 
+@pytest_asyncio.fixture
+async def app_enabled(migrated_db):
+    """App with fault injection mounted (as the dev Compose override and tests enable it)."""
+    from mock_billing.app import create_app
+
+    app = create_app(migrated_db.model_copy(update={"fault_injection_enabled": True}))
+    yield app
+    await app.state.engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def client_enabled(app_enabled):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app_enabled), base_url="http://billing.test"
+    ) as http:
+        yield http
+
+
+@pytest_asyncio.fixture
+async def client_disabled(migrated_db):
+    from mock_billing.app import create_app
+
+    app = create_app(migrated_db.model_copy(update={"fault_injection_enabled": False}))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://billing.test"
+    ) as http:
+        yield http
+    await app.state.engine.dispose()
+
+
+@pytest.fixture
+def admin() -> dict[str, str]:
+    return {"X-Fault-Admin-Key": TEST_FAULT_ADMIN_KEY}
+
+
 @pytest.fixture
 def auth() -> dict[str, str]:
     return {"X-API-Key": TEST_API_KEY}
@@ -115,3 +150,8 @@ def B(personas):
 @pytest.fixture(scope="session")
 def C(personas):
     return _persona_ns(personas[2])
+
+
+@pytest.fixture(scope="session")
+def E(personas):
+    return _persona_ns(personas[4])
