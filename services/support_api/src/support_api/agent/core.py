@@ -102,6 +102,17 @@ def _instructions_estimate(instructions: str) -> int:
     return len(instructions) // 3
 
 
+def _has_nul(value: object) -> bool:
+    """True when any string in ``value`` holds NUL, which a jsonb payload cannot store."""
+    if isinstance(value, str):
+        return "\x00" in value
+    if isinstance(value, dict):
+        return any(_has_nul(k) or _has_nul(v) for k, v in value.items())
+    if isinstance(value, list | tuple):
+        return any(_has_nul(v) for v in value)
+    return False
+
+
 class AgentCore:
     def __init__(
         self,
@@ -204,17 +215,21 @@ class AgentCore:
             if response.status != "completed":
                 raise _End("limit_reached")  # a truncated answer is never shown or run
             if not response.function_calls:
-                if not response.text:
+                # Postgres text/jsonb cannot hold NUL: strip it so storing the reply cannot fail.
+                reply = (response.text or "").replace("\x00", "")
+                if not reply:
                     raise _End("limit_reached")
                 # Only the latest tool result decides: re-verifying later in the turn clears it.
                 if tool_traces and tool_traces[-1].error_code == "verification_expired":
                     raise _End("verification_expired")
                 return TurnOutcome(
                     status="completed",
-                    reply=response.text,
+                    reply=reply,
                     trace=self._trace(tool_traces, ctx),
                     final_items=tuple(
-                        i for i in response.output_items if i.get("type") != "message"
+                        i
+                        for i in response.output_items
+                        if i.get("type") != "message" and not _has_nul(i)
                     ),
                 )
 

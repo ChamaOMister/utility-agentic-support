@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text as sql_text
+from support_api.agent.models.base import ModelResponse
 from support_api.agent.models.scripted import ASK_VERIFICATION, GREETING
 from support_api.app import create_app
 from support_api.catalog import MESSAGES
@@ -112,6 +113,55 @@ async def test_lone_surrogate_text_is_422(api, db):
         assert r.status_code == 422 and r.json() == {"error": "invalid_request"}, raw
     assert await turns(db, api.conversation_id) == []
     assert api.model.requests_count == 0
+
+
+async def test_nul_text_is_422(api, db):
+    """M2: NUL cannot be stored in jsonb or text: rejected as invalid, never a 500."""
+    path = f"/api/conversations/{api.conversation_id}/messages"
+    for escaped in ("\\u0000", "ol\\u0000á"):
+        raw = f'{{"client_message_id": "{uuid4()}", "text": "{escaped}"}}'
+        r = await api.http.post(
+            path, content=raw, headers={**ORIGIN, "Content-Type": "application/json"}
+        )
+        assert r.status_code == 422 and r.json() == {"error": "invalid_request"}, raw
+    assert await turns(db, api.conversation_id) == []
+    assert api.model.requests_count == 0
+    # The conversation is unaffected: a normal message still completes.
+    assert (await api.send(uuid4(), "olá")).json()["status"] == "completed"
+
+
+def _final(reply: str, *extra: dict) -> ModelResponse:
+    msg = {"type": "message", "role": "assistant", "content": reply}
+    return ModelResponse("completed", reply, (), (*extra, msg))
+
+
+async def test_model_reply_with_nul_completes_without_nul(api_fake_model, db):
+    """M2: a model reply or reasoning item carrying NUL never 500s or strands the turn."""
+    api = api_fake_model
+    nul_reasoning = {
+        "type": "reasoning",
+        "id": "r_nul",
+        "summary": [{"type": "summary_text", "text": "a\x00b"}],
+    }
+    api.model.push(_final("Ol\x00á!", nul_reasoning))
+    r = await api.send(uuid4(), "olá")
+    assert r.status_code == 200
+    assert r.json()["status"] == "completed" and r.json()["reply"] == "Olá!"
+    (row,) = await turns(db, api.conversation_id)
+    assert (row.status, row.reply) == ("completed", "Olá!")
+    # The NUL-bearing reasoning item is not stored (jsonb cannot hold it).
+    assert await items_for(db, row.id) == ["user_message", "assistant_message"]
+
+
+async def test_model_reply_of_only_nul_is_limit_reached(api_fake_model, db):
+    api = api_fake_model
+    api.model.push(_final("\x00\x00"))
+    r = await api.send(uuid4(), "olá")
+    assert r.status_code == 200
+    assert r.json()["status"] == "failed"
+    assert r.json()["reply"] == MESSAGES["limit_reached"]
+    (row,) = await turns(db, api.conversation_id)
+    assert row.status == "failed"
 
 
 async def test_turn_limit_30(api, db):

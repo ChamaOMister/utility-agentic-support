@@ -21,7 +21,8 @@ from ..turns.service import TurnLimits, submit_message
 router = APIRouter(prefix="/api/conversations")
 
 MAX_TEXT_CODE_POINTS = 2000
-_SURROGATE = re.compile("[\ud800-\udfff]")
+# Text Postgres cannot store: lone surrogates (not UTF-8) and NUL (rejected by text and jsonb).
+_UNSTORABLE = re.compile("[\x00\ud800-\udfff]")
 
 _NEEDS_RECOVERY = text(
     "SELECT active_turn_id IS NOT NULL AND (active_turn_lease_expires_at IS NULL "
@@ -111,8 +112,9 @@ async def post_message(
     # Code points, not bytes or UTF-16 units: 2,000 "ç" or emoji are allowed (Review Focus 4).
     if not 1 <= len(message_text) <= MAX_TEXT_CODE_POINTS:
         return _invalid("text_length")
-    # JSON "\ud800" escapes decode to lone surrogates (U+D800-U+DFFF), which are not UTF-8.
-    if _SURROGATE.search(message_text):
+    # JSON "\ud800" escapes decode to lone surrogates (U+D800-U+DFFF), which are not UTF-8;
+    # "\u0000" decodes to NUL. Either would fail the insert with a 500.
+    if _UNSTORABLE.search(message_text):
         return _invalid()
 
     state = request.app.state
