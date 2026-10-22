@@ -1,9 +1,11 @@
 """Shared test fixtures for support_api (extended by later tasks)."""
 
+import asyncio
 import functools
 import json
 import os
 import socket
+import uuid
 from pathlib import Path
 
 import httpcore
@@ -13,6 +15,7 @@ import pytest_asyncio
 from alembic import command
 from alembic.config import Config
 from sqlalchemy.ext.asyncio import create_async_engine
+from support_api.checkpoints import Checkpoints, SimulatedCrash
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SERVICE_DIR = REPO_ROOT / "services" / "support_api"
@@ -340,3 +343,125 @@ def billing_server(tmp_path_factory):
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
+
+
+# ---------------------------------------------------------------------------
+# Turn-claim helpers (Task 8): database, conversation, checkpoints, lease control.
+# ---------------------------------------------------------------------------
+@pytest_asyncio.fixture
+async def db(settings):
+    from support_api.db import Database
+
+    database = Database(settings.support_database_url)
+    try:
+        yield database
+    finally:
+        await database.dispose()
+
+
+@pytest_asyncio.fixture
+async def conversation(db):
+    """A browser session plus one conversation row; returns the conversation id."""
+    from sqlalchemy import text
+
+    async with db.begin() as conn:
+        session_id = (
+            await conn.execute(
+                text(
+                    "INSERT INTO support.browser_sessions (token_sha256, expires_at) "
+                    "VALUES (:h, now() + interval '1 hour') RETURNING id"
+                ),
+                {"h": uuid.uuid4().bytes},
+            )
+        ).scalar_one()
+        return (
+            await conn.execute(
+                text(
+                    "INSERT INTO support.conversations (browser_session_id) "
+                    "VALUES (:s) RETURNING id"
+                ),
+                {"s": session_id},
+            )
+        ).scalar_one()
+
+
+async def claim_in_tx(db, conversation_id, turn_id, lease_s: int = 60):
+    """Claim in its own transaction (begin -> try_claim -> commit). Returns Claim | None."""
+    from support_api.turns.claim import try_claim
+
+    async with db.begin() as conn:
+        return await try_claim(conn, conversation_id, turn_id, lease_s)
+
+
+async def expire_lease(db, conversation_id) -> None:
+    from sqlalchemy import text
+
+    async with db.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE support.conversations "
+                "SET active_turn_lease_expires_at = now() - interval '1 second' WHERE id = :c"
+            ),
+            {"c": conversation_id},
+        )
+
+
+async def take_over(db, conversation_id):
+    """Expire the current lease and claim as a new turn; returns the new Claim."""
+    await expire_lease(db, conversation_id)
+    claim = await claim_in_tx(db, conversation_id, uuid.uuid4())
+    assert claim is not None
+    return claim
+
+
+class PauseGate:
+    """Handle for ``pause_at``: ``reached`` is set when the checkpoint is hit; ``release()`` resumes."""
+
+    def __init__(self, name: str, nth: int) -> None:
+        self.reached = asyncio.Event()
+        self._release = asyncio.Event()
+        gate = self
+
+        class _Paused(Checkpoints):
+            def __init__(self) -> None:
+                self.hits = 0
+
+            async def hit(self, hit_name: str) -> None:
+                if hit_name != name:
+                    return
+                self.hits += 1
+                if self.hits == nth:
+                    gate.reached.set()
+                    await gate._release.wait()
+
+        self.checkpoints = _Paused()
+
+    def release(self) -> None:
+        self._release.set()
+
+
+@pytest.fixture
+def pause_at():
+    def make(name: str, *, nth: int = 1) -> PauseGate:
+        return PauseGate(name, nth)
+
+    return make
+
+
+@pytest.fixture
+def crash_at():
+    def make(name: str, *, nth: int = 1) -> Checkpoints:
+        class _Crashing(Checkpoints):
+            def __init__(self) -> None:
+                self.hits = 0
+
+            async def hit(self, hit_name: str) -> None:
+                if hit_name != name:
+                    return
+                self.hits += 1
+                if self.hits == nth:
+                    raise SimulatedCrash(f"simulated crash at {name} (hit {nth})")
+
+        return _Crashing()
+
+    return make

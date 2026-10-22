@@ -49,3 +49,16 @@ def test_empty_api_key_and_comma_separated_origins(monkeypatch):
     s = Settings(**REQUIRED)
     assert s.openai_api_key is None
     assert s.allowed_origins == ["https://a.example", "https://b.example"]
+
+
+def test_settings_reject_deadline_not_below_lease():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="TURN_DEADLINE_S"):
+        Settings(**REQUIRED, turn_deadline_s=60, turn_lease_s=60)
+    with pytest.raises(ValidationError):
+        Settings(**REQUIRED, turn_deadline_s=61, turn_lease_s=60)
+    assert (
+        Settings(**REQUIRED, turn_deadline_s=59, turn_lease_s=60).turn_deadline_s == 59
+    )

@@ -2,7 +2,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import AliasChoices, Field, SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -69,3 +69,10 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return [o.strip() for o in v.split(",") if o.strip()]
         return v
+
+    @model_validator(mode="after")
+    def _deadline_below_lease(self):
+        # The lease must outlive the turn deadline; the gap is the margin the pre-send gate relies on.
+        if self.turn_deadline_s >= self.turn_lease_s:
+            raise ValueError("TURN_DEADLINE_S must be below TURN_LEASE_S")
+        return self
