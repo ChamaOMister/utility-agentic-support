@@ -8,6 +8,7 @@ from sqlalchemy import text as sql_text
 from support_api.agent.models.scripted import ASK_VERIFICATION, GREETING
 from support_api.app import create_app
 from support_api.catalog import MESSAGES
+from support_api.usage.pricing import LiveGateClosed
 
 from tests.conftest import (
     ORIGIN,
@@ -186,8 +187,8 @@ async def test_transcript_lists_turns_without_payloads(api, personas):
     assert personas[0]["cpf"] not in raw and personas[0]["customer_ref"] not in raw
 
 
-def test_openai_provider_without_model_fails_at_startup(settings):
-    with pytest.raises(RuntimeError, match="Task 18"):
+def test_openai_provider_without_live_approval_fails_at_startup(settings):
+    with pytest.raises(LiveGateClosed, match="live_disabled"):
         create_app(settings.model_copy(update={"llm_provider": "openai"}))
 
 

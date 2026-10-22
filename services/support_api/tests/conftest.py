@@ -1219,3 +1219,185 @@ async def identifier_row(db, identifier_hash):
                 {"h": identifier_hash},
             )
         ).one()
+
+
+# OpenAI fixtures use the real SDK with legacy httpx, intercepted by respx. Every key is fake.
+def provider_response(
+    *, output=None, status="completed", service_tier="default", usage=True
+):
+    return {
+        "id": "resp_test",
+        "object": "response",
+        "created_at": 1,
+        "model": "gpt-6-luna",
+        "status": status,
+        "service_tier": service_tier,
+        "error": None,
+        "incomplete_details": None,
+        "instructions": None,
+        "metadata": {},
+        "parallel_tool_calls": True,
+        "tools": [],
+        "tool_choice": "auto",
+        "temperature": 1,
+        "top_p": 1,
+        "output": output
+        if output is not None
+        else [
+            {
+                "id": "msg_test",
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [
+                    {"type": "output_text", "text": "Certo!", "annotations": []}
+                ],
+            }
+        ],
+        "usage": {
+            "input_tokens": 100,
+            "input_tokens_details": {"cached_tokens": 20},
+            "output_tokens": 10,
+            "output_tokens_details": {"reasoning_tokens": 2},
+            "total_tokens": 110,
+        }
+        if usage
+        else None,
+    }
+
+
+class OpenAIMock:
+    def __init__(self, router):
+        self.routes = {
+            name: router.post("https://api.openai.com/v1/" + path, name=name)
+            for name, path in (
+                ("input_tokens", "responses/input_tokens"),
+                ("responses", "responses"),
+            )
+        }
+        self.routes["input_tokens"].respond(
+            200, json={"object": "response.input_tokens", "input_tokens": 100}
+        )
+        self.routes["responses"].respond(
+            200, json=provider_response(), headers={"x-request-id": "req_test"}
+        )
+
+    def route(self, name):
+        return self.routes[name]
+
+    @property
+    def call_count(self):
+        return sum(r.call_count for r in self.routes.values())
+
+    def captured_all(self, name):
+        return [json.loads(c.request.content) for c in self.routes[name].calls]
+
+    def count_returns(self, values):
+        self.routes["input_tokens"].mock(
+            side_effect=[
+                httpx.Response(
+                    200, json={"object": "response.input_tokens", "input_tokens": n}
+                )
+                for n in values
+            ]
+        )
+
+
+@pytest.fixture
+def openai_mock(billing_mock):
+    return OpenAIMock(billing_mock)
+
+
+@pytest.fixture
+def verified_live_config(monkeypatch):
+    from support_api.usage.pricing import ModelsConfig, Pricing
+
+    fixtures = SERVICE_DIR / "tests" / "fixtures"
+    pricing_data = json.loads((fixtures / "pricing_verified.json").read_text())
+    model_data = json.loads((fixtures / "models_verified.json").read_text())
+    pricing = Pricing(pricing_data["models"], pricing_data["token_count"])
+    models = ModelsConfig(model_data)
+    monkeypatch.setattr(Pricing, "load", lambda path: pricing)
+    monkeypatch.setattr(ModelsConfig, "load", lambda path: models)
+    return pricing_data, model_data, pricing, models
+
+
+@pytest.fixture
+def live_settings(settings, verified_live_config):
+    from pydantic import SecretStr
+
+    return settings.model_copy(
+        update={
+            "llm_provider": "openai",
+            "live_llm_enabled": True,
+            "openai_api_key": SecretStr("sk-test-not-real"),
+            "openai_chat_model": "gpt-6-luna",
+            "openai_service_tier": "default",
+        }
+    )
+
+
+@pytest_asyncio.fixture
+async def live_app_factory(
+    db, live_settings, verified_live_config, checkpoint_hub, openai_mock, fake_clock
+):
+    from support_api.app import create_app
+
+    apis = []
+
+    async def make(*, reasoning_items="current_turn", **overrides):
+        verified_live_config[1]["gpt-6-luna"]["reasoning_items"] = reasoning_items
+        app = create_app(
+            live_settings.model_copy(update=overrides),
+            checkpoints=checkpoint_hub,
+            clock=fake_clock,
+        )
+        http = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="https://support.test"
+        )
+        response = await http.post("/api/conversations", json={}, headers=ORIGIN)
+        assert response.status_code == 201
+        api = TurnApi(
+            app,
+            http,
+            uuid.UUID(response.json()["conversation_id"]),
+            app.state.model,
+            None,
+        )
+        api.openai_routes = openai_mock.routes
+        apis.append(api)
+        return api
+
+    yield make
+    for api in apis:
+        await api.model.aclose()
+        await _close_turn_api(api)
+
+
+@pytest_asyncio.fixture
+async def api_live_mocked(live_app_factory):
+    return await live_app_factory()
+
+
+async def llm_calls(db, conversation_id, *, kind="generation"):
+    from sqlalchemy import text
+
+    async with db.begin() as conn:
+        return (
+            await conn.execute(
+                text(
+                    "SELECT * FROM support.llm_calls WHERE conversation_id = :c AND kind = :k ORDER BY created_at, id"
+                ),
+                {"c": _cid(conversation_id), "k": kind},
+            )
+        ).all()
+
+
+async def only_llm_call(db, conversation_id, *, kind="generation"):
+    rows = await llm_calls(db, conversation_id, kind=kind)
+    assert len(rows) == 1
+    return rows[0]
+
+
+async def live_blocked_reason(db, conversation_id):
+    return (await conversation_row(db, conversation_id)).live_blocked_reason

@@ -127,7 +127,10 @@ _TRANSITION = text(
     "  outcome_class = COALESCE(CAST(:outcome_class AS text), l.outcome_class), "
     "  estimated_usd = COALESCE(CAST(:estimated AS numeric), l.estimated_usd), "
     "  input_tokens = COALESCE(CAST(:in_tok AS integer), l.input_tokens), "
-    "  output_tokens = COALESCE(CAST(:out_tok AS integer), l.output_tokens) "
+    "  output_tokens = COALESCE(CAST(:out_tok AS integer), l.output_tokens), "
+    "  latency_ms = COALESCE(CAST(:latency_ms AS integer), l.latency_ms), "
+    "  provider_request_id = COALESCE(CAST(:request_id AS text), l.provider_request_id), "
+    "  service_tier = COALESCE(CAST(:tier AS text), l.service_tier) "
     "FROM old WHERE l.id = old.id "
     "RETURNING old.status AS prior, l.reserved_usd AS amount, l.conversation_id AS conversation_id"
 )
@@ -233,7 +236,15 @@ async def _assert_owned(conn: AsyncConnection, claim: Claim, llm_call_id: UUID) 
     return True
 
 
-async def release(conn: AsyncConnection, claim: Claim, llm_call_id: UUID) -> bool:
+async def release(
+    conn: AsyncConnection,
+    claim: Claim,
+    llm_call_id: UUID,
+    *,
+    outcome_class: str | None = None,
+    latency_ms: int | None = None,
+    provider_request_id: str | None = None,
+) -> bool:
     """``reserved -> released``; never applies to ``uncertain``. Call inside ``fenced``."""
     if not await _assert_owned(conn, claim, llm_call_id):
         return False
@@ -244,10 +255,13 @@ async def release(conn: AsyncConnection, claim: Claim, llm_call_id: UUID) -> boo
                 "id": llm_call_id,
                 "from_statuses": ["reserved"],
                 "to_status": "released",
-                "outcome_class": None,
+                "outcome_class": outcome_class,
                 "estimated": None,
                 "in_tok": None,
                 "out_tok": None,
+                "latency_ms": latency_ms,
+                "request_id": provider_request_id,
+                "tier": None,
             },
         )
     ).first()
@@ -263,6 +277,10 @@ async def mark_uncertain(
     llm_call_id: UUID,
     outcome_class: str,
     block_reason: str | None,
+    *,
+    latency_ms: int | None = None,
+    provider_request_id: str | None = None,
+    service_tier: str | None = None,
 ) -> bool:
     """``reserved -> uncertain``: the full amount stays held. Call inside ``fenced``.
 
@@ -282,6 +300,9 @@ async def mark_uncertain(
                 "estimated": None,
                 "in_tok": None,
                 "out_tok": None,
+                "latency_ms": latency_ms,
+                "request_id": provider_request_id,
+                "tier": service_tier,
             },
         )
     ).first()
@@ -293,7 +314,17 @@ async def mark_uncertain(
     return True
 
 
-async def settle(db: Database, llm_call_id: UUID, usage: Usage, rate: Rate) -> bool:
+async def settle(
+    db: Database,
+    llm_call_id: UUID,
+    usage: Usage,
+    rate: Rate,
+    *,
+    outcome_class: str | None = None,
+    latency_ms: int | None = None,
+    provider_request_id: str | None = None,
+    service_tier: str | None = None,
+) -> bool:
     """``reserved|uncertain -> settled`` with usage actually received. Unfenced (§5.5).
 
     Removes the held amount from whichever bucket held it and adds the priced usage to ``spent``.
@@ -308,10 +339,13 @@ async def settle(db: Database, llm_call_id: UUID, usage: Usage, rate: Rate) -> b
                     "id": llm_call_id,
                     "from_statuses": ["reserved", "uncertain"],
                     "to_status": "settled",
-                    "outcome_class": None,
+                    "outcome_class": outcome_class,
                     "estimated": actual,
                     "in_tok": usage.input_tokens,
                     "out_tok": usage.output_tokens,
+                    "latency_ms": latency_ms,
+                    "request_id": provider_request_id,
+                    "tier": service_tier,
                 },
             )
         ).first()

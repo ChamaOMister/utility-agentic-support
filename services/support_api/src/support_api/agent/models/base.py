@@ -38,6 +38,10 @@ class ModelContext:
     deadline: Deadline
     checkpoints: Checkpoints
     trace: list[dict]
+    # Authoritative count belongs to this turn and this exact request, never the shared model.
+    counted_request: ModelRequest | None = None
+    input_tokens: int | None = None
+    counted_model: str | None = None
 
 
 class ModelUnavailable(Exception):

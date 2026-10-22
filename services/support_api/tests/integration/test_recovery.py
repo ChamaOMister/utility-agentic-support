@@ -30,8 +30,6 @@ from tests.conftest import (
     turn_id,
 )
 
-OPENAI_PENDING = pytest.mark.skip(reason="requires_openai_model: enabled in Task 18")
-
 
 def _wrong_auth_args(persona: dict) -> dict:
     return {
@@ -58,8 +56,6 @@ async def _active_claim(db, conversation_id) -> Claim:
 # --------------------------------------------------------------------------- AC 12 (Task 18)
 
 
-@pytest.mark.requires_openai_model
-@OPENAI_PENDING
 async def test_crash_after_send(api_live_mocked, db, crash_at):  # AC 12
     from tests.conftest import live_blocked_reason, only_llm_call  # Task 18 helpers
 
@@ -72,7 +68,7 @@ async def test_crash_after_send(api_live_mocked, db, crash_at):  # AC 12
     replay = await api_live_mocked.send(mid, "minhas faturas")
     assert replay.status_code == 200 and replay.json()["status"] == "interrupted"
     assert replay.json()["reply"] == MESSAGES["turn_interrupted"]
-    call = await only_llm_call(db, kind="generation")
+    call = await only_llm_call(db, api_live_mocked.conversation_id, kind="generation")
     assert call.status == "uncertain" and call.reserved_usd > 0
     assert (
         await live_blocked_reason(db, api_live_mocked.conversation_id)
@@ -83,8 +79,6 @@ async def test_crash_after_send(api_live_mocked, db, crash_at):  # AC 12
     assert api_live_mocked.openai_routes["responses"].call_count == 1
 
 
-@pytest.mark.requires_openai_model
-@OPENAI_PENDING
 async def test_startup_sweep_recovers_without_request(api_live_mocked, db, crash_at):
     from tests.conftest import live_blocked_reason, only_llm_call  # Task 18 helpers
 
@@ -96,7 +90,7 @@ async def test_startup_sweep_recovers_without_request(api_live_mocked, db, crash
     assert await startup_sweep(db) >= 1
     turn = await turn_by_mid(db, mid)
     assert turn.status == "interrupted" and turn.reply == MESSAGES["turn_interrupted"]
-    call = await only_llm_call(db, kind="generation")
+    call = await only_llm_call(db, api_live_mocked.conversation_id, kind="generation")
     assert call.status == "uncertain" and call.reserved_usd > 0
     assert (
         await live_blocked_reason(db, api_live_mocked.conversation_id)
