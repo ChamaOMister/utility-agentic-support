@@ -76,7 +76,8 @@ class TurnOutcome:
     status: Literal["completed", "failed"]
     reply: str
     trace: dict  # {"tool_calls": [...], "model_calls": [...]}
-    final_items: tuple[dict, ...]  # final response's reasoning items; () for catalog endings
+    # The final response's reasoning items; () for catalog endings.
+    final_items: tuple[dict, ...]
 
 
 class _End(Exception):
