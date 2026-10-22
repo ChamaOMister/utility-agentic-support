@@ -11,11 +11,13 @@ can put the attempt count in the trace; failures raise ``BillingError`` (also ca
 import asyncio
 import logging
 import random
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Literal
+from urllib.parse import quote
 
 import httpx
 from pydantic import TypeAdapter, ValidationError
@@ -37,6 +39,24 @@ JITTER = 0.25
 MIN_USEFUL_ATTEMPT_S = (
     0.5  # a retry is only worth sleeping for if this much time remains after it
 )
+
+
+_SEGMENT = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def _segment(value: str) -> str | None:
+    """A value safe to interpolate as one URL path segment, or None. Quoted as defense in depth."""
+    if not _SEGMENT.fullmatch(value):
+        return None
+    return quote(value, safe="")
+
+
+def _ref_segment(ref: str) -> str:
+    seg = _segment(ref)
+    if seg is None:
+        # Refs come from our own database, never from the model: a bad one is a programming error.
+        raise ValueError("invalid customer ref")
+    return seg
 
 
 class BillingError(Exception):
@@ -112,7 +132,7 @@ class BillingClient:
         return await self._call(
             "get_account",
             "GET",
-            f"/v1/customers/{ref}/account",
+            f"/v1/customers/{_ref_segment(ref)}/account",
             parse=Account.model_validate,
             retry=True,
             deadline=deadline,
@@ -134,7 +154,7 @@ class BillingClient:
         return await self._call(
             "list_bills",
             "GET",
-            f"/v1/customers/{ref}/bills",
+            f"/v1/customers/{_ref_segment(ref)}/bills",
             parse=_BILL_LIST.validate_python,
             retry=True,
             deadline=deadline,
@@ -145,10 +165,15 @@ class BillingClient:
     async def get_bill(
         self, ref: str, bill_id: str, *, deadline: Deadline, guard: Guard | None = None
     ) -> BillingResult[BillDetail]:
+        ref_seg = _ref_segment(ref)
+        bill_seg = _segment(bill_id)
+        if bill_seg is None:
+            # bill_id may come from model tool arguments: indistinguishable from a missing bill.
+            raise BillingError("not_found", 0)
         return await self._call(
             "get_bill",
             "GET",
-            f"/v1/customers/{ref}/bills/{bill_id}",
+            f"/v1/customers/{ref_seg}/bills/{bill_seg}",
             parse=BillDetail.model_validate,
             retry=True,
             deadline=deadline,

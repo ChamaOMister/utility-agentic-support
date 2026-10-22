@@ -409,3 +409,127 @@ async def test_failed_attempts_are_logged_without_payload(respx_mock, client, ca
     rec = [r for r in caplog.records if r.name == "support_api.billing"][-1]
     assert rec.http_status == 401 and rec.error_code == "upstream_unavailable"
     assert rec.attempt == 1 and rec.tool_name == "get_account"
+
+
+@pytest.mark.parametrize(
+    "bill_id",
+    [
+        "../../cus_b/account",
+        "x?limit=1",
+        "x/../y",
+        "%2e%2e",
+        "",
+        "a b",
+        "x\n",
+        "a" * 65,
+    ],
+)
+async def test_unsafe_bill_id_is_not_found_and_sends_nothing(
+    respx_mock, client, bill_id
+):
+    route = respx_mock.route().mock(return_value=httpx.Response(200, json=ACCOUNT_JSON))
+    guard = AsyncMock()
+    with pytest.raises(BillingError) as e:
+        await client.get_bill("cus_a", bill_id, deadline=Deadline(45), guard=guard)
+    assert e.value.code == "not_found" and e.value.attempts == 0
+    assert route.call_count == 0 and guard.await_count == 0
+
+
+@pytest.mark.parametrize(
+    "ref", ["../cus_b", "cus_a/../cus_b", "cus_a?x=1", "", "a b", "%2e%2e"]
+)
+async def test_unsafe_ref_is_programming_error_and_sends_nothing(
+    respx_mock, client, ref
+):
+    route = respx_mock.route().mock(return_value=httpx.Response(200, json=ACCOUNT_JSON))
+    d = Deadline(45)
+    for call in (
+        client.get_account(ref, deadline=d),
+        client.list_bills(ref, status=None, limit=1, deadline=d),
+        client.get_bill(ref, "b1", deadline=d),
+    ):
+        with pytest.raises(ValueError):
+            await call
+    assert route.call_count == 0
+
+
+async def test_safe_segments_reach_the_exact_path(respx_mock, client):
+    route = respx_mock.get(BILL_URL).mock(
+        return_value=httpx.Response(200, json=BILL_DETAIL_JSON)
+    )
+    await client.get_bill("cus_a", "b1", deadline=Deadline(45))
+    assert route.calls[0].request.url.raw_path == b"/v1/customers/cus_a/bills/b1"
+
+
+TIMEOUT_ERRORS = [
+    httpx.ConnectTimeout("t"),
+    httpx.PoolTimeout("t"),
+    httpx.ReadTimeout("t"),
+]
+UNAVAILABLE_ERRORS = [httpx.RemoteProtocolError("p"), httpx.ConnectError("c")]
+ALL_ERRORS = [*TIMEOUT_ERRORS, *UNAVAILABLE_ERRORS, httpx.DecodingError("d")]
+
+
+@pytest.mark.parametrize("exc", TIMEOUT_ERRORS, ids=lambda e: type(e).__name__)
+async def test_timeout_errors_map_to_timeout_and_are_retried_on_get(
+    respx_mock, client, fake_sleep, exc
+):
+    route = respx_mock.get(ACCOUNT_URL).mock(side_effect=exc)
+    with pytest.raises(BillingError) as e:
+        await client.get_account("cus_a", deadline=Deadline(45))
+    assert e.value.code == "upstream_timeout" and e.value.attempts == 3
+    assert route.call_count == 3 and len(fake_sleep.calls) == 2
+
+
+@pytest.mark.parametrize("exc", UNAVAILABLE_ERRORS, ids=lambda e: type(e).__name__)
+async def test_transport_errors_map_to_unavailable_and_are_retried_on_get(
+    respx_mock, client, fake_sleep, exc
+):
+    route = respx_mock.get(ACCOUNT_URL).mock(side_effect=exc)
+    with pytest.raises(BillingError) as e:
+        await client.get_account("cus_a", deadline=Deadline(45))
+    assert e.value.code == "upstream_unavailable" and e.value.attempts == 3
+    assert route.call_count == 3 and len(fake_sleep.calls) == 2
+
+
+async def test_decoding_error_is_unavailable_and_not_retried(
+    respx_mock, client, fake_sleep
+):
+    route = respx_mock.get(ACCOUNT_URL).mock(
+        side_effect=httpx.DecodingError("bad gzip")
+    )
+    with pytest.raises(BillingError) as e:
+        await client.get_account("cus_a", deadline=Deadline(45))
+    assert e.value.code == "upstream_unavailable" and e.value.attempts == 1
+    assert route.call_count == 1 and fake_sleep.calls == []
+
+
+@pytest.mark.parametrize("exc", ALL_ERRORS, ids=lambda e: type(e).__name__)
+async def test_verify_post_never_retried_for_any_error(
+    respx_mock, client, fake_sleep, exc
+):
+    from datetime import date
+
+    route = respx_mock.post(VERIFY_URL).mock(side_effect=exc)
+    with pytest.raises(BillingError) as e:
+        await client.verify(
+            "12345678909", date(1980, 1, 2), "1234", deadline=Deadline(45)
+        )
+    expected = "upstream_timeout" if exc in TIMEOUT_ERRORS else "upstream_unavailable"
+    assert e.value.code == expected and e.value.attempts == 1
+    assert route.call_count == 1 and fake_sleep.calls == []
+
+
+@pytest.mark.parametrize(
+    "body", [b"<html><body>Bad gateway</body></html>", b""], ids=["html", "empty"]
+)
+async def test_non_json_200_is_unavailable_and_not_retried(
+    respx_mock, client, fake_sleep, body
+):
+    route = respx_mock.get(ACCOUNT_URL).mock(
+        return_value=httpx.Response(200, content=body)
+    )
+    with pytest.raises(BillingError) as e:
+        await client.get_account("cus_a", deadline=Deadline(45))
+    assert e.value.code == "upstream_unavailable" and e.value.attempts == 1
+    assert route.call_count == 1 and fake_sleep.calls == []
