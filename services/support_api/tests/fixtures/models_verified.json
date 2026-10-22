@@ -1,0 +1,8 @@
+{
+  "gpt-6-luna": {
+    "reasoning_items": "current_turn",
+    "source_url": "test-fixture",
+    "verified_on": "2026-01-01",
+    "verified": true
+  }
+}
