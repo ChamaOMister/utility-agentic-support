@@ -22,8 +22,9 @@ export default function ChatPanel({ui, turns, busy, ready, submit, retry}) {
       <article className="message assistant"><span className="speaker">{ui.assistant}</span><p>{ui.welcome}</p></article>
       {turns.map(turn => <React.Fragment key={turn.client_message_id}>
         <article className="message user"><span className="speaker">{ui.you}</span><p data-testid="user-message">{turn.text}</p></article>
-        {turn.reply && <article className="message assistant"><span className="speaker">{ui.assistant}</span>
-          <p data-testid="assistant-reply">{turn.reply}</p>
+        {(turn.reply || turn.retry) && <article className="message assistant"><span className="speaker">{ui.assistant}</span>
+          {turn.reply ? <p data-testid="assistant-reply">{turn.reply}</p>
+            : <p className="pending" data-testid="pending-reply" role="status">{ui.sending}</p>}
           {turn.retry && <button type="button" className="retry-button" disabled={busy || !ready} onClick={() => retry(turn)}>{ui.retry}</button>}
         </article>}
       </React.Fragment>)}

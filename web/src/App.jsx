@@ -11,6 +11,11 @@ function restoredTurn(turn) {
   return {...turn, correlationId: turn.correlation_id,
     retry: turn.status === 'interrupted' ? 'new' : turn.status === 'in_progress' ? 'same' : null};
 }
+// A turn restored while still running on the server (e.g. after a reload): it shows a pending
+// bubble with the same-ID retry, and the transcript is re-read until the server finishes it.
+const isPending = turn => turn.status === 'in_progress' && !turn.reply;
+const pendingPollMs = 2000;
+const pendingPollLimitMs = 75000; // past the 60 s lease, when a stuck turn is recovered as interrupted
 export default function App() {
   const [ui, setUi] = useState(fallback);
   const [health, setHealth] = useState(null);
@@ -40,6 +45,24 @@ export default function App() {
     finally {setLoading(false);}
   }
   useEffect(() => {initialize();}, []);
+  const hasPending = turns.some(isPending);
+  useEffect(() => {
+    if (!conversationId || !hasPending) return undefined;
+    let active = true;
+    const started = Date.now();
+    const timer = setInterval(async () => {
+      if (Date.now() - started > pendingPollLimitMs) {clearInterval(timer); return;}
+      try {
+        const finished = new Map((await getConversation(conversationId)).turns
+          .filter(t => t.status !== 'in_progress').map(t => [t.client_message_id, t]));
+        if (!active) return;
+        // Only turns still pending here: a same-ID retry in flight owns its turn.
+        setTurns(previous => previous.map(t => isPending(t) && finished.has(t.client_message_id)
+          ? restoredTurn(finished.get(t.client_message_id)) : t));
+      } catch {/* The same-ID retry stays available. */}
+    }, pendingPollMs);
+    return () => {active = false; clearInterval(timer);};
+  }, [conversationId, hasPending]);
   async function submit(text, retryTurn = null) {
     if (sending.current) return;
     sending.current = true; setBusy(true);
