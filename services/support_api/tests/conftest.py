@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SERVICE_DIR = REPO_ROOT / "services" / "support_api"
 PERSONAS_PATH = REPO_ROOT / "data" / "synthetic" / "personas.json"
+TEST_ORIGIN = "https://demo-5173.app.github.dev"
+ORIGIN = {"Origin": TEST_ORIGIN}
 
 
 def _load_dotenv(path: Path) -> None:
@@ -151,6 +153,7 @@ def support_db():
         billing_api_key="test-service-key",
         identifier_hash_key="test-hash-key",
         personas_path=PERSONAS_PATH,
+        allowed_origins=[TEST_ORIGIN],
         llm_provider="scripted",
         live_llm_enabled=False,
         openai_api_key=None,
@@ -194,3 +197,45 @@ async def client_demo_off(settings):
     async with http:
         yield http
     await app.state.db.engine.dispose()
+
+
+# https base URL: the session cookie is Secure, so the client's cookie jar only stores and sends it
+# over https.
+def new_client(app) -> httpx.AsyncClient:
+    """A fresh client (own cookie jar = own browser session) bound to ``app``; closed by the fixture."""
+    http = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="https://support.test"
+    )
+    app.state.test_clients.append(http)
+    return http
+
+
+async def _make_app(settings):
+    from support_api.app import create_app
+
+    app = create_app(settings)
+    app.state.test_clients = []
+    return app
+
+
+async def _close_app(app) -> None:
+    for http in app.state.test_clients:
+        await http.aclose()
+    await app.state.db.engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def app(settings):
+    app = await _make_app(settings)
+    yield app
+    await _close_app(app)
+
+
+@pytest_asyncio.fixture
+async def app_with_origins(settings):
+    """ALLOWED_ORIGINS="https://demo-5173.app.github.dev" (the documented Codespaces shape)."""
+    app = await _make_app(
+        settings.model_copy(update={"allowed_origins": [TEST_ORIGIN]})
+    )
+    yield app
+    await _close_app(app)

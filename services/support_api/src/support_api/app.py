@@ -4,10 +4,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from . import sessions
+from .channels.chat import router as chat_router
 from .checkpoints import Checkpoints
 from .db import Database
 from .demo import load_demo_customers
 from .demo import router as demo_router
+from .logging import CorrelationIdMiddleware
 from .settings import Settings
 
 
@@ -33,6 +36,10 @@ def create_app(
     app.state.billing_transport = billing_transport
     app.state.checkpoints = checkpoints or Checkpoints()
     app.state.clock = clock
+    sessions.install(app)
+    app.include_router(chat_router)
+    # Outermost: every response (including errors) carries X-Correlation-ID.
+    app.add_middleware(CorrelationIdMiddleware)
 
     @app.get("/api/health")
     async def health() -> dict[str, str | bool]:
