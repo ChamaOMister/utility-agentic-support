@@ -148,6 +148,21 @@ def _user_text(item: dict) -> str:
     return content if isinstance(content, str) else ""
 
 
+_CALL_ID = re.compile(r"^scripted_call_(\d+)$")
+
+
+def _next_call_id(items: tuple[dict, ...]) -> str:
+    """One past the highest ``scripted_call_<n>`` in the input, so truncated history can't collide."""
+    highest = 0
+    for item in items:
+        if item.get("type") not in ("function_call", "function_call_output"):
+            continue
+        m = _CALL_ID.match(str(item.get("call_id")))
+        if m:
+            highest = max(highest, int(m.group(1)))
+    return f"scripted_call_{highest + 1}"
+
+
 def _calls_by_id(items: tuple[dict, ...]) -> dict[str, dict]:
     return {
         i["call_id"]: i
@@ -366,7 +381,7 @@ class ScriptedModel:
     async def generate(self, request: ModelRequest, ctx: ModelContext) -> ModelResponse:
         items = request.input
         calls = _calls_by_id(items)
-        call_id = f"scripted_call_{sum(1 for i in items if i.get('type') == 'function_call') + 1}"
+        call_id = _next_call_id(items)
         users = [i for i in items if _is_user(i)]
         last = items[-1] if items else None
 

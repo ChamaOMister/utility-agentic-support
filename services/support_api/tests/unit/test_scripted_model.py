@@ -352,11 +352,41 @@ async def test_response_shapes():
     )
 
 
-async def test_call_ids_continue_after_existing_calls():
+async def test_call_id_follows_highest_existing_suffix():
+    # History truncation dropped calls 1 and 2; the next id must not reuse 3 or 4.
     r = await gen(
-        *VERIFIED_TURN_ITEMS[:5], assistant("Pronto!"), user("e as faturas pagas?")
+        user("minhas faturas"),
+        call("scripted_call_3", "authenticate_customer"),
+        output("scripted_call_3", AUTH_OK),
+        call("scripted_call_4", "list_bills"),
+        output("scripted_call_4", BILLS_A),
+        assistant("Pronto!"),
+        user("e as faturas pagas?"),
     )
-    assert r.function_calls[0].call_id == "scripted_call_2"
+    assert r.function_calls[0].call_id == "scripted_call_5"
+
+
+async def test_call_id_counts_function_call_output_items_too():
+    r = await gen(
+        user("x"),
+        output("scripted_call_7", AUTH_OK),
+        assistant("ok"),
+        user(CREDS),
+    )
+    assert r.function_calls[0].call_id == "scripted_call_8"
+
+
+async def test_call_ids_not_matching_the_pattern_are_ignored():
+    r = await gen(
+        *VERIFIED_TURN_ITEMS[:5],
+        call("scripted_call_x9", "list_bills"),
+        output("scripted_call_x9", BILLS_A),
+        call("my_scripted_call_40", "list_bills"),
+        output("my_scripted_call_40", BILLS_A),
+        assistant("Pronto!"),
+        user("e as faturas pagas?"),
+    )
+    assert r.function_calls[0].call_id == "scripted_call_1"
 
 
 async def test_scripted_model_is_deterministic():
