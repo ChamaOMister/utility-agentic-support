@@ -348,6 +348,20 @@ def billing_server(tmp_path_factory):
 # ---------------------------------------------------------------------------
 # Turn-claim helpers (Task 8): database, conversation, checkpoints, lease control.
 # ---------------------------------------------------------------------------
+async def _reset_project_budget(database) -> None:
+    """The project budget row is shared by every test: zero its counters (cap is left alone) so
+    one test's reservations never leak into another test or the pristine-seed migration test."""
+    from sqlalchemy import text
+
+    async with database.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE support.budget_accounts "
+                "SET spent_usd = 0, reserved_usd = 0, uncertain_usd = 0 WHERE id = 'project'"
+            )
+        )
+
+
 @pytest_asyncio.fixture
 async def db(settings):
     from sqlalchemy import text
@@ -359,9 +373,11 @@ async def db(settings):
     async with database.begin() as conn:
         await conn.execute(text("DELETE FROM support.verification_attempts"))
         await conn.execute(text("DELETE FROM support.identifier_lockouts"))
+    await _reset_project_budget(database)
     try:
         yield database
     finally:
+        await _reset_project_budget(database)
         await database.dispose()
 
 
@@ -636,3 +652,142 @@ async def expire_verification(db, conversation_or_claim) -> None:
             ),
             {"c": _cid(conversation_or_claim)},
         )
+
+
+# ---------------------------------------------------------------------------
+# Budget helpers (Task 12): ledger rows, budget rows, reservations. Reused by Tasks 17-18.
+# ---------------------------------------------------------------------------
+async def lock_conversation(conn, conversation_id) -> None:
+    """Take the conversation row lock in the caller's transaction (as recovery's caller does)."""
+    from sqlalchemy import text
+
+    await conn.execute(
+        text("SELECT 1 FROM support.conversations WHERE id = :c FOR UPDATE"),
+        {"c": _cid(conversation_id)},
+    )
+
+
+async def llm_call(db, llm_call_id):
+    """The ``llm_calls`` row (as a row object with column attributes)."""
+    from sqlalchemy import text
+
+    async with db.begin() as conn:
+        return (
+            await conn.execute(
+                text("SELECT * FROM support.llm_calls WHERE id = :i"),
+                {"i": llm_call_id},
+            )
+        ).one()
+
+
+async def conv_budget(db, conversation_or_claim):
+    """The ``conversation_budgets`` row, or ``None`` if none was created yet."""
+    from sqlalchemy import text
+
+    async with db.begin() as conn:
+        return (
+            await conn.execute(
+                text(
+                    "SELECT * FROM support.conversation_budgets WHERE conversation_id = :c"
+                ),
+                {"c": _cid(conversation_or_claim)},
+            )
+        ).one_or_none()
+
+
+async def project_budget(db):
+    """The ``budget_accounts`` row for the project. It is shared by every test: assert on deltas."""
+    from sqlalchemy import text
+
+    async with db.begin() as conn:
+        return (
+            await conn.execute(
+                text("SELECT * FROM support.budget_accounts WHERE id = 'project'")
+            )
+        ).one()
+
+
+async def conversation_row(db, conversation_or_claim):
+    from sqlalchemy import text
+
+    async with db.begin() as conn:
+        return (
+            await conn.execute(
+                text("SELECT * FROM support.conversations WHERE id = :c"),
+                {"c": _cid(conversation_or_claim)},
+            )
+        ).one()
+
+
+async def reserve_in_fenced(
+    db, claim, amount, *, barrier: asyncio.Barrier | None = None, **overrides
+):
+    """``reserve`` inside its own ``fenced`` transaction, as a turn worker runs it.
+
+    With ``barrier``, every caller waits (bounded) until all parties have started. Returns the
+    llm_call id; ``BudgetExceeded`` / ``ClaimLost`` propagate.
+    """
+    from support_api.turns.claim import fenced
+    from support_api.usage.budget import reserve
+
+    if barrier is not None:
+        await asyncio.wait_for(barrier.wait(), 10)
+    args = {"kind": "generation", "model": "m", "tier": "default", "attempt": 1}
+    args.update(overrides)
+    async with fenced(db, claim) as conn:
+        return await reserve(conn, claim, amount=amount, **args)
+
+
+@pytest_asyncio.fixture
+async def reservation(db, claimed_conversation):
+    """A ``reserved`` generation call of 0.04 on ``claimed_conversation`` (``.id``, ``.claim``)."""
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    amount = Decimal("0.04")
+    llm_call_id = await reserve_in_fenced(db, claimed_conversation, amount)
+    return SimpleNamespace(id=llm_call_id, claim=claimed_conversation, amount=amount)
+
+
+@pytest_asyncio.fixture
+async def many_claimed(ten_claimed_conversations):
+    return ten_claimed_conversations
+
+
+@pytest_asyncio.fixture
+async def project_cap_small(db):
+    """Lower the project cap to 0.05 above what is already held/spent; restores it afterwards.
+
+    Yields the headroom (``Decimal("0.05")``). The project row is shared across tests, so the cap is
+    relative to the current total rather than absolute.
+    """
+    from decimal import Decimal
+
+    from sqlalchemy import text
+
+    headroom = Decimal("0.05")
+    async with db.begin() as conn:
+        original = (
+            await conn.execute(
+                text(
+                    "SELECT cap_usd FROM support.budget_accounts WHERE id = 'project' FOR UPDATE"
+                )
+            )
+        ).scalar_one()
+        await conn.execute(
+            text(
+                "UPDATE support.budget_accounts SET "
+                "cap_usd = spent_usd + reserved_usd + uncertain_usd + :h WHERE id = 'project'"
+            ),
+            {"h": headroom},
+        )
+    try:
+        yield headroom
+    finally:
+        async with db.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE support.budget_accounts SET cap_usd = :c WHERE id = 'project'"
+                ),
+                {"c": original},
+            )
