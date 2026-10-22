@@ -10,6 +10,7 @@ RUN pip install .
 COPY alembic.ini ./
 COPY migrations ./migrations
 COPY config ./config
+COPY prompts ./prompts
 
 EXPOSE 8000
 # Compose supplies SUPPORT_DATABASE_URL, BILLING_*, IDENTIFIER_HASH_KEY, ALLOWED_ORIGINS and PERSONAS_PATH.

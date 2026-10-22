@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     allowed_origins: Annotated[list[str], NoDecode] = []
     personas_path: Path = Path("data/synthetic/personas.json")
     demo_data_endpoint_enabled: bool = True
+    # System instructions; a relative path is resolved against the working directory, then the
+    # service directory (services/support_api).
+    system_prompt_path: Path = Path("prompts/system_ptbr.md")
 
     # Model provider. LIVE_LLM_ENABLED stays false unless a human flips it; the gate in §5.6 also
     # needs verified pricing/model config, which ships as placeholders.

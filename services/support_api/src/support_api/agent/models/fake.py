@@ -12,13 +12,16 @@ class QueueExhausted(AssertionError):
 
 class QueuedFakeModel:
     name = "queued-fake"
+    live = False
 
     def __init__(
         self,
         responses: list[ModelResponse | Exception],
         *,
         token_count: int | None = None,
+        live: bool = False,
     ) -> None:
+        self.live = live
         self._queue = list(responses)
         self._token_count = token_count
         self.requests: list[ModelRequest] = []

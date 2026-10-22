@@ -374,6 +374,7 @@ def estimate_request_tokens(request: ModelRequest) -> int:
 
 class ScriptedModel:
     name = "scripted"
+    live = False
 
     async def count_input_tokens(self, request: ModelRequest, ctx: ModelContext) -> int:
         return estimate_request_tokens(request)

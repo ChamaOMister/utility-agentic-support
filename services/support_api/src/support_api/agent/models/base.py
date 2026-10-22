@@ -53,6 +53,7 @@ class ModelUnavailable(Exception):
 
 class ChatModel(Protocol):
     name: str
+    live: bool  # True when calls reach a paid provider (gated by live_blocked_reason)
 
     async def count_input_tokens(
         self, request: ModelRequest, ctx: ModelContext
