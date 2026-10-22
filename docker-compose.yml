@@ -45,6 +45,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      mock-billing:
+        condition: service_healthy
     environment:
       SUPPORT_DATABASE_URL: postgresql+psycopg://support_app:${SUPPORT_DB_PASSWORD:?run scripts/init-env.sh first}@db:5432/uas
       BILLING_BASE_URL: http://mock-billing:8001
@@ -76,6 +78,11 @@ services:
       GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN: ${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}
     ports:
       - "5173:5173"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173/').then(r => process.exit(r.status === 200 ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
 volumes:
   pgdata:

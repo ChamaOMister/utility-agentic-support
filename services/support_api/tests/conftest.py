@@ -1401,3 +1401,112 @@ async def only_llm_call(db, conversation_id, *, kind="generation"):
 
 async def live_blocked_reason(db, conversation_id):
     return (await conversation_row(db, conversation_id)).live_blocked_reason
+
+
+# Task 20: full offline API with a real fault-enabled billing subprocess.
+class ObservedBillingTransport(httpx.AsyncBaseTransport):
+    """Real HTTP transport; count outbound verify requests without retaining payloads."""
+
+    def __init__(self, verify_response_delay=0):
+        self.inner = httpx.AsyncHTTPTransport()
+        self.verify_response_delay = verify_response_delay
+        self.verify_requests = []
+
+    async def handle_async_request(self, request):
+        verifying = request.url.path == "/v1/identity/verify"
+        if verifying:
+            self.verify_requests.append(request.method)
+        response = await self.inner.handle_async_request(request)
+        if verifying and self.verify_response_delay:
+            await asyncio.sleep(self.verify_response_delay)
+        return response
+
+    async def aclose(self):
+        await self.inner.aclose()
+
+
+@pytest_asyncio.fixture
+async def live_billing_api_factory(db, settings, billing_server, checkpoint_hub):
+    """Each API has its own browser session; all use the real billing process and shared DB."""
+    from support_api.app import create_app
+
+    apis = []
+
+    async def make(*, verify_response_delay=0):
+        transport = ObservedBillingTransport(verify_response_delay)
+        app = create_app(
+            settings.model_copy(update={"billing_base_url": billing_server.base_url}),
+            billing_transport=transport,
+            checkpoints=checkpoint_hub,
+        )
+        http = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="https://support.test"
+        )
+        response = await http.post("/api/conversations", json={}, headers=ORIGIN)
+        assert response.status_code == 201
+        api = TurnApi(
+            app,
+            http,
+            uuid.UUID(response.json()["conversation_id"]),
+            app.state.model,
+            transport,
+        )
+        apis.append(api)
+        return api
+
+    try:
+        yield make
+    finally:
+        for api in apis:
+            await _close_turn_api(api)
+
+
+@pytest_asyncio.fixture
+async def set_fault(billing_server):
+    """Replace/clear authenticated dev fault rules; clean up even after a failing assertion."""
+    async with httpx.AsyncClient(base_url=billing_server.base_url, timeout=3) as http:
+        headers = {"X-Fault-Admin-Key": billing_server.fault_admin_key}
+
+        async def put(route_name=None, customer_ref=None, effect=None):
+            if route_name is None:
+                response = await http.delete("/_dev/faults", headers=headers)
+            else:
+                response = await http.put(
+                    "/_dev/faults",
+                    headers=headers,
+                    json={
+                        "rules": [
+                            {
+                                "route_name": route_name,
+                                "customer_ref": customer_ref,
+                                "effect": effect,
+                            }
+                        ]
+                    },
+                )
+            assert response.status_code == 204
+
+        await put()
+        try:
+            yield put
+        finally:
+            await put()
+
+
+@pytest.fixture
+def caplog_json():
+    """Capture the production formatter/filter synchronously while request context is active."""
+    import io
+    import logging
+
+    from support_api.logging import configure
+
+    stream = io.StringIO()
+    root = logging.getLogger()
+    original_level = root.level
+    handler = configure(stream=stream)
+    try:
+        yield stream
+    finally:
+        root.removeHandler(handler)
+        root.setLevel(original_level)
