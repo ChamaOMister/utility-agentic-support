@@ -239,3 +239,104 @@ async def app_with_origins(settings):
     )
     yield app
     await _close_app(app)
+
+
+# ---------------------------------------------------------------------------
+# Live mock-billing subprocess (session-scoped; reused by later integration tests).
+# ---------------------------------------------------------------------------
+BILLING_TEST_API_KEY = "test-service-key"
+BILLING_TEST_FAULT_ADMIN_KEY = "test-fault-admin-key"
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+@pytest.fixture(scope="session")
+def billing_server(tmp_path_factory):
+    """Run mock-billing (uvicorn, fault injection on) on a free localhost port against ``uas_test``.
+
+    The billing schema is rebuilt from mock-billing's own migrations and seeded with the personas,
+    exactly as mock-billing's tests do. Yields a namespace with ``base_url``, ``api_key`` and
+    ``fault_admin_key``.
+    """
+    import asyncio
+    import subprocess
+    import sys
+    import time
+    from types import SimpleNamespace
+
+    from mock_billing.seed import seed_from_file
+
+    url = os.environ["BILLING_TEST_DATABASE_URL"]
+    cfg = Config(str(REPO_ROOT / "services" / "mock_billing" / "alembic.ini"))
+    cfg.set_main_option(
+        "script_location", str(REPO_ROOT / "services" / "mock_billing" / "migrations")
+    )
+    cfg.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
+    command.downgrade(cfg, "base")
+    command.upgrade(cfg, "head")
+    asyncio.run(seed_from_file(url, PERSONAS_PATH))
+
+    port = _free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    env = {
+        **os.environ,
+        "BILLING_DATABASE_URL": url,
+        "BILLING_API_KEY": BILLING_TEST_API_KEY,
+        "FAULT_INJECTION_ENABLED": "true",
+        "FAULT_ADMIN_KEY": BILLING_TEST_FAULT_ADMIN_KEY,
+        "PERSONAS_PATH": str(PERSONAS_PATH),
+    }
+    log_path = tmp_path_factory.mktemp("billing_server") / "uvicorn.log"
+    with log_path.open("wb") as log:
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "mock_billing.main:build",
+                "--factory",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--log-level",
+                "warning",
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        )
+        try:
+            deadline = time.monotonic() + 20
+            while True:
+                if proc.poll() is not None:
+                    raise RuntimeError(
+                        f"mock-billing exited early:\n{log_path.read_text(errors='replace')}"
+                    )
+                try:
+                    if httpx.get(f"{base_url}/health", timeout=1).status_code == 200:
+                        break
+                except httpx.HTTPError:
+                    pass
+                if time.monotonic() > deadline:
+                    raise RuntimeError(
+                        f"mock-billing not healthy:\n{log_path.read_text(errors='replace')}"
+                    )
+                time.sleep(0.1)
+            yield SimpleNamespace(
+                base_url=base_url,
+                api_key=BILLING_TEST_API_KEY,
+                fault_admin_key=BILLING_TEST_FAULT_ADMIN_KEY,
+            )
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
