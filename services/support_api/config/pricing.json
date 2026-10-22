@@ -1,0 +1,15 @@
+{
+  "models": {
+    "gpt-6-luna": {
+      "default": {
+        "input_per_mtok": null,
+        "cached_input_per_mtok": null,
+        "output_per_mtok": null,
+        "source_url": null,
+        "verified_on": null,
+        "verified": false
+      }
+    }
+  },
+  "token_count": {"billed": null, "source_url": null, "verified_on": null}
+}

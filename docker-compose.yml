@@ -39,5 +39,31 @@ services:
       timeout: 3s
       retries: 12
 
+  support-api:
+    build: ./services/support_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SUPPORT_DATABASE_URL: postgresql+psycopg://support_app:${SUPPORT_DB_PASSWORD:?run scripts/init-env.sh first}@db:5432/uas
+      BILLING_BASE_URL: http://mock-billing:8001
+      BILLING_API_KEY: ${BILLING_API_KEY:?run scripts/init-env.sh first}
+      IDENTIFIER_HASH_KEY: ${IDENTIFIER_HASH_KEY:?run scripts/init-env.sh first}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      LLM_PROVIDER: scripted
+      LIVE_LLM_ENABLED: "false"
+      DEMO_DATA_ENDPOINT_ENABLED: "true"
+      PERSONAS_PATH: /data/synthetic/personas.json
+    volumes:
+      - ./data/synthetic:/data/synthetic:ro
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
 volumes:
   pgdata:
