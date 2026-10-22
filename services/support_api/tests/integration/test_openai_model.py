@@ -611,3 +611,90 @@ async def test_zero_usage_does_not_release_unknown_spend(
     call = await only_llm_call(db, ctx.claim)
     assert call.status == "uncertain" and call.estimated_usd is None
     assert await live_blocked_reason(db, ctx.claim) == "provider_outcome_unknown"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        [{"text": "Certo!", "annotations": []}],
+        [{"type": "unknown", "text": "Certo!", "annotations": []}],
+        [{"type": "output_text", "annotations": []}],
+        [{"type": "output_text", "text": "Certo!"}],
+        [
+            {
+                "type": "output_text",
+                "text": "Certo!",
+                "annotations": [{"type": "url_citation"}],
+            }
+        ],
+        [{"type": "refusal"}],
+    ],
+    ids=[
+        "missing_type",
+        "unknown_type",
+        "missing_text",
+        "missing_annotations",
+        "invalid_annotation",
+        "missing_refusal",
+    ],
+)
+async def test_malformed_message_content_returns_upstream_and_blocks(
+    api_live_mocked, openai_mock, db, content
+):
+    body = provider_response()
+    body["output"][0]["content"] = content
+    openai_mock.route("responses").respond(200, json=body)
+    api = api_live_mocked
+    response = await api.send(uuid4(), "olá")
+    assert response.json()["reply"] == MESSAGES["upstream_unavailable"]
+    assert response.json()["status"] == "failed"
+    call = await only_llm_call(db, api.conversation_id)
+    assert call.status == "settled" and call.estimated_usd == Decimal("0.000203")
+    assert (
+        await live_blocked_reason(db, api.conversation_id) == "provider_outcome_unknown"
+    )
+    assert openai_mock.route("responses").call_count == 1
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        [{"type": "refusal", "refusal": "Não posso atender a esse pedido."}],
+        [
+            {
+                "type": "output_text",
+                "text": "Certo!",
+                "annotations": [
+                    {
+                        "type": "url_citation",
+                        "start_index": 0,
+                        "end_index": 5,
+                        "title": "Synthetic source",
+                        "url": "https://example.test/source",
+                    }
+                ],
+            }
+        ],
+    ],
+    ids=["refusal", "annotated_text"],
+)
+async def test_valid_message_content_and_reasoning_remain_intact(
+    model, request_body, ctx, openai_mock, db, content
+):
+    reasoning = {
+        "id": "rs_test",
+        "type": "reasoning",
+        "summary": [],
+        "encrypted_content": "opaque",
+    }
+    body = provider_response()
+    body["output"][0]["content"] = content
+    body["output"].insert(0, reasoning)
+    openai_mock.route("responses").respond(200, json=body)
+    response = await generate(model, request_body, ctx)
+    assert response.status == "completed"
+    assert response.text == ("Certo!" if content[0]["type"] == "output_text" else None)
+    assert response.output_items == tuple(body["output"])
+    assert (await only_llm_call(db, ctx.claim)).status == "settled"
+    assert await live_blocked_reason(db, ctx.claim) is None
+    assert openai_mock.route("responses").call_count == 1

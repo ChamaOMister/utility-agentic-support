@@ -13,6 +13,7 @@ import time
 from decimal import Decimal
 
 import openai
+from openai.types.responses import ResponseOutputMessage
 from sqlalchemy import text
 
 from support_api.agent.models.base import (
@@ -310,7 +311,8 @@ def _model_response(response) -> ModelResponse:
     ):
         raise ValueError("invalid provider response")
     items = tuple(
-        item.model_dump(mode="json", exclude_unset=True) for item in response.output
+        item.model_dump(mode="json", exclude_unset=True, warnings="error")
+        for item in response.output
     )
     calls = []
     texts = []
@@ -323,7 +325,10 @@ def _model_response(response) -> ModelResponse:
                 raise ValueError("invalid provider function call")
             calls.append(FunctionCall(item["call_id"], item["name"], item["arguments"]))
         elif item.get("type") == "message":
-            for part in item["content"]:
-                if part.get("type") == "output_text":
-                    texts.append(part["text"])
+            # SDK HTTP parsing constructs models without validating required fields.
+            # Validate its pinned message schema while retaining the original output items.
+            message = ResponseOutputMessage.model_validate(item, strict=True)
+            for part in message.content:
+                if part.type == "output_text":
+                    texts.append(part.text)
     return ModelResponse(response.status, "".join(texts) or None, tuple(calls), items)
