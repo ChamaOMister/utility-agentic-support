@@ -14,7 +14,9 @@ from .models import bill_line_items, bills, customers, installations
 
 BillStatus = Literal["open", "paid", "overdue"]
 
-router = APIRouter(prefix="/v1", dependencies=[Depends(require_api_key), Depends(apply_faults)])
+router = APIRouter(
+    prefix="/v1", dependencies=[Depends(require_api_key), Depends(apply_faults)]
+)
 Conn = Annotated[AsyncConnection, Depends(get_conn)]
 
 
@@ -93,7 +95,12 @@ def _digits(value: str) -> str:
     return "".join(ch for ch in value if ch.isascii() and ch.isdigit())
 
 
-@router.post("/identity/verify", name="verify", response_model=VerifyResponse, response_model_exclude_none=True)
+@router.post(
+    "/identity/verify",
+    name="verify",
+    response_model=VerifyResponse,
+    response_model_exclude_none=True,
+)
 async def verify(body: VerifyRequest, conn: Conn) -> VerifyResponse:
     digits = _digits(body.identifier)
     column = {11: customers.c.cpf, 10: customers.c.account_number}.get(len(digits))
@@ -101,13 +108,21 @@ async def verify(body: VerifyRequest, conn: Conn) -> VerifyResponse:
     if column is not None:
         row = (await conn.execute(select(customers).where(column == digits))).first()
     # Unknown identifier and wrong answers produce the identical response.
-    if row is None or row.birth_date != body.birth_date or _digits(row.phone)[-4:] != body.phone_last4:
+    if (
+        row is None
+        or row.birth_date != body.birth_date
+        or _digits(row.phone)[-4:] != body.phone_last4
+    ):
         return VerifyResponse(verified=False)
-    return VerifyResponse(verified=True, customer_ref=row.customer_ref, first_name=row.first_name)
+    return VerifyResponse(
+        verified=True, customer_ref=row.customer_ref, first_name=row.first_name
+    )
 
 
 async def _customer(conn: AsyncConnection, ref: str):
-    row = (await conn.execute(select(customers).where(customers.c.customer_ref == ref))).first()
+    row = (
+        await conn.execute(select(customers).where(customers.c.customer_ref == ref))
+    ).first()
     if row is None:
         raise ApiError(404, "not_found")
     return row
@@ -126,14 +141,21 @@ async def get_account(ref: str, conn: Conn) -> Account:
     return Account(
         customer_ref=c.customer_ref,
         masked_cpf=f"***.***.***-{c.cpf[-2:]}",
-        installations=[Installation(installation_id=i.installation_id, label=i.label) for i in insts],
-        address=Address(street=c.street, neighborhood=c.neighborhood, city=c.city, state=c.state),
+        installations=[
+            Installation(installation_id=i.installation_id, label=i.label)
+            for i in insts
+        ],
+        address=Address(
+            street=c.street, neighborhood=c.neighborhood, city=c.city, state=c.state
+        ),
         tariff_class=c.tariff_class,
         account_status=c.account_status,
     )
 
 
-@router.get("/customers/{ref}/bills", name="list_bills", response_model=list[BillSummary])
+@router.get(
+    "/customers/{ref}/bills", name="list_bills", response_model=list[BillSummary]
+)
 async def list_bills(
     ref: str,
     conn: Conn,
@@ -150,12 +172,16 @@ async def list_bills(
     return [_summary(r) for r in (await conn.execute(stmt)).all()]
 
 
-@router.get("/customers/{ref}/bills/{bill_id}", name="bill_detail", response_model=BillDetail)
+@router.get(
+    "/customers/{ref}/bills/{bill_id}", name="bill_detail", response_model=BillDetail
+)
 async def get_bill(ref: str, bill_id: str, conn: Conn) -> dict:
     # Ownership is enforced by path scoping: a bill of another customer is simply not found,
     # exactly like a nonexistent one.
     row = (
-        await conn.execute(select(bills).where(bills.c.bill_id == bill_id, bills.c.customer_ref == ref))
+        await conn.execute(
+            select(bills).where(bills.c.bill_id == bill_id, bills.c.customer_ref == ref)
+        )
     ).first()
     if row is None:
         raise ApiError(404, "not_found")
@@ -169,5 +195,8 @@ async def get_bill(ref: str, bill_id: str, conn: Conn) -> dict:
     return {
         **_summary(row),
         "issue_date": row.issue_date,
-        "line_items": [{"description": i.description, "amount_brl": _money(i.amount_brl)} for i in items],
+        "line_items": [
+            {"description": i.description, "amount_brl": _money(i.amount_brl)}
+            for i in items
+        ],
     }

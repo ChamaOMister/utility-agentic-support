@@ -83,7 +83,9 @@ async def seed(engine: AsyncEngine, personas: list[dict]) -> None:
                     "bill_id",
                 )
             )
-            await conn.execute(bill_line_items.delete().where(bill_line_items.c.bill_id.in_(bill_ids)))
+            await conn.execute(
+                bill_line_items.delete().where(bill_line_items.c.bill_id.in_(bill_ids))
+            )
             await conn.execute(
                 bill_line_items.insert(),
                 [

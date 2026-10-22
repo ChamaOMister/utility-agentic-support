@@ -16,6 +16,8 @@ def _key_matches(supplied: str | None, expected: str) -> bool:
     )
 
 
-async def require_api_key(request: Request, x_api_key: str | None = Header(default=None)) -> None:
+async def require_api_key(
+    request: Request, x_api_key: str | None = Header(default=None)
+) -> None:
     if not _key_matches(x_api_key, request.app.state.settings.billing_api_key):
         raise ApiError(401, "unauthorized")

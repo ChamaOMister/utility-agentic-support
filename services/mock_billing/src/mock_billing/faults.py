@@ -34,8 +34,13 @@ class FaultRule(BaseModel):
     @classmethod
     def _valid_effect(cls, value: str) -> str:
         if not _EFFECT_RE.fullmatch(value):
-            raise ValueError("effect must be timeout, http_500, unavailable or delay_ms:N")
-        if value.startswith("delay_ms:") and int(value.partition(":")[2]) > MAX_DELAY_MS:
+            raise ValueError(
+                "effect must be timeout, http_500, unavailable or delay_ms:N"
+            )
+        if (
+            value.startswith("delay_ms:")
+            and int(value.partition(":")[2]) > MAX_DELAY_MS
+        ):
             raise ValueError(f"delay_ms must be <= {MAX_DELAY_MS}")
         return value
 
@@ -54,7 +59,9 @@ async def require_fault_admin_key(
         raise ApiError(401, "unauthorized")
 
 
-admin_router = APIRouter(prefix="/_dev", dependencies=[Depends(require_fault_admin_key)])
+admin_router = APIRouter(
+    prefix="/_dev", dependencies=[Depends(require_fault_admin_key)]
+)
 
 
 @admin_router.put("/faults", status_code=204)

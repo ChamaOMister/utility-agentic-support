@@ -124,17 +124,29 @@ class OpenAIResponsesModel:
         except DeadlineExpired as exc:
             raise ModelUnavailable("limit_reached") from exc
         except Exception as exc:
-            ctx.trace.append({
-                "kind": "token_count", "model": self.name, "service_tier": None,
-                "input_tokens": None, "output_tokens": None,
-                "estimated_cost_usd": None, "outcome_class": "count_failed",
-            })
+            ctx.trace.append(
+                {
+                    "kind": "token_count",
+                    "model": self.name,
+                    "service_tier": None,
+                    "input_tokens": None,
+                    "output_tokens": None,
+                    "estimated_cost_usd": None,
+                    "outcome_class": "count_failed",
+                }
+            )
             raise ModelUnavailable("upstream_unavailable") from exc
-        ctx.trace.append({
-            "kind": "token_count", "model": self.name, "service_tier": None,
-            "input_tokens": tokens, "output_tokens": None,
-            "estimated_cost_usd": None, "outcome_class": "completed",
-        })
+        ctx.trace.append(
+            {
+                "kind": "token_count",
+                "model": self.name,
+                "service_tier": None,
+                "input_tokens": tokens,
+                "output_tokens": None,
+                "estimated_cost_usd": None,
+                "outcome_class": "completed",
+            }
+        )
         ctx.counted_request = counted_request
         ctx.input_tokens = tokens
         ctx.counted_model = self.name
@@ -252,7 +264,8 @@ class OpenAIResponsesModel:
                     "input_tokens": usage.input_tokens if usage is not None else None,
                     "output_tokens": usage.output_tokens if usage is not None else None,
                     "estimated_cost_usd": str(actual_usd(usage, rate))
-                    if usage is not None and rate is not None else None,
+                    if usage is not None and rate is not None
+                    else None,
                     "outcome_class": str(decision.outcome),
                 }
             )

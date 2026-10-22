@@ -9,5 +9,7 @@ from .settings import Settings
 
 
 def build() -> FastAPI:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s"
+    )
     return create_app(Settings())

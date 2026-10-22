@@ -6,7 +6,9 @@ async def test_health_reports_scripted_mode(client):
     resp = await client.get("/api/health")
     assert resp.status_code == 200
     assert resp.json() == {
-        "status": "ok", "mode": "scripted", "live_enabled": False,
+        "status": "ok",
+        "mode": "scripted",
+        "live_enabled": False,
         "ui": {**UI_MESSAGES, "offline_badge": MESSAGES["offline_badge"]},
     }
 

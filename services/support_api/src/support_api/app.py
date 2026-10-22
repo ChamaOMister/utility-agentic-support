@@ -12,8 +12,8 @@ from .agent.core import AgentCore
 from .agent.models.base import ChatModel
 from .agent.models.openai_model import OpenAIResponsesModel
 from .agent.models.scripted import ScriptedModel
-from .channels.chat import router as chat_router
 from .catalog import MESSAGES, UI_MESSAGES
+from .channels.chat import router as chat_router
 from .checkpoints import Checkpoints
 from .db import Database
 from .demo import load_demo_customers

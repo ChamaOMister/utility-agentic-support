@@ -37,7 +37,9 @@ def _env_value(name: str) -> str:
             key, sep, value = line.partition("=")
             if sep and key.strip() == name:
                 return value.strip()
-    raise RuntimeError(f"{name} is not set; run scripts/init-env.sh and `docker compose up -d --wait db`")
+    raise RuntimeError(
+        f"{name} is not set; run scripts/init-env.sh and `docker compose up -d --wait db`"
+    )
 
 
 def _alembic_config(url: str) -> Config:

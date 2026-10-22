@@ -31,7 +31,12 @@ installations = sa.Table(
     "installations",
     metadata,
     sa.Column("installation_id", sa.Text, primary_key=True),
-    sa.Column("customer_ref", sa.Text, sa.ForeignKey("billing.customers.customer_ref"), nullable=False),
+    sa.Column(
+        "customer_ref",
+        sa.Text,
+        sa.ForeignKey("billing.customers.customer_ref"),
+        nullable=False,
+    ),
     sa.Column("label", sa.Text, nullable=False),
 )
 
@@ -39,9 +44,17 @@ bills = sa.Table(
     "bills",
     metadata,
     sa.Column("bill_id", sa.Text, primary_key=True),
-    sa.Column("customer_ref", sa.Text, sa.ForeignKey("billing.customers.customer_ref"), nullable=False),
     sa.Column(
-        "installation_id", sa.Text, sa.ForeignKey("billing.installations.installation_id"), nullable=False
+        "customer_ref",
+        sa.Text,
+        sa.ForeignKey("billing.customers.customer_ref"),
+        nullable=False,
+    ),
+    sa.Column(
+        "installation_id",
+        sa.Text,
+        sa.ForeignKey("billing.installations.installation_id"),
+        nullable=False,
     ),
     sa.Column("reference_month", sa.String(7), nullable=False),
     sa.Column("issue_date", sa.Date, nullable=False),
@@ -56,7 +69,12 @@ bills = sa.Table(
 bill_line_items = sa.Table(
     "bill_line_items",
     metadata,
-    sa.Column("bill_id", sa.Text, sa.ForeignKey("billing.bills.bill_id", ondelete="CASCADE"), primary_key=True),
+    sa.Column(
+        "bill_id",
+        sa.Text,
+        sa.ForeignKey("billing.bills.bill_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
     sa.Column("position", sa.Integer, primary_key=True),
     sa.Column("description", sa.Text, nullable=False),
     sa.Column("amount_brl", sa.Numeric(12, 2), nullable=False),

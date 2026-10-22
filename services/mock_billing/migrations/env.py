@@ -12,7 +12,9 @@ VERSION_SCHEMA = "billing"
 
 
 def _url() -> str:
-    return config.get_main_option("sqlalchemy.url") or os.environ["BILLING_DATABASE_URL"]
+    return (
+        config.get_main_option("sqlalchemy.url") or os.environ["BILLING_DATABASE_URL"]
+    )
 
 
 def run_migrations_offline() -> None:

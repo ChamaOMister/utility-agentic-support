@@ -41,7 +41,9 @@ def create_app(settings: Settings) -> FastAPI:
         supplied = request.headers.get("x-correlation-id", "")
         correlation_id = supplied if _CORRELATION_RE.fullmatch(supplied) else "-"
         started = time.monotonic()
-        status = 500  # logged if call_next raises, so a failing request still gets its line
+        status = (
+            500  # logged if call_next raises, so a failing request still gets its line
+        )
         try:
             response = await call_next(request)
             status = response.status_code
@@ -49,7 +51,9 @@ def create_app(settings: Settings) -> FastAPI:
             _log_request(request, correlation_id, status, started)
         return response
 
-    def _log_request(request: Request, correlation_id: str, status: int, started: float) -> None:
+    def _log_request(
+        request: Request, correlation_id: str, status: int, started: float
+    ) -> None:
         route = request.scope.get("route")
         # Allowlisted fields only: never payloads, identifiers or path parameters.
         logger.info(
