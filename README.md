@@ -44,6 +44,7 @@ python3.12 -m venv .venv
 .venv/bin/pip install -e 'services/mock_billing[dev]' -e 'services/support_api[dev]'
 .venv/bin/pytest --asyncio-mode=auto --tb=short services/mock_billing services/support_api -v -rs
 .venv/bin/ruff check services
+.venv/bin/ruff format --check services
 cd web
 npm ci
 npx playwright install --with-deps chromium
@@ -51,7 +52,7 @@ npm run build
 npx playwright test --workers=2
 ```
 
-The backend suites rebuild only the dedicated `uas_test` schemas and use a fault-enabled billing subprocess. Run the combined command sequentially: an independent mock-billing schema test process must not overlap the support API's billing fixture. Every support API test has an autouse network guard against real OpenAI connections. OpenAI integration tests use mocked HTTP and fake keys. Root pytest needs the explicit `--asyncio-mode=auto` flag because service-local pytest settings do not apply to the combined root invocation.
+The backend suites rebuild only the dedicated `uas_test` schemas and use a fault-enabled billing subprocess. Run the combined command sequentially: an independent mock-billing schema test process must not overlap the support API's billing fixture. Every support API test has an autouse network guard against real OpenAI connections. OpenAI integration tests use mocked HTTP and fake keys. Root pytest needs the explicit `--asyncio-mode=auto` flag because service-local pytest settings do not apply to the combined root invocation. The two ruff commands above, run from the repository root, are the canonical lint and format gate; running ruff from inside a service directory classifies first-party imports differently and reports import-order (`I001`) findings that the root run does not.
 
 For Playwright inside a Codespace, localhost must also be permitted. Apply this additive runtime-only override before running the browser suite; it keeps the generated Codespaces origin and leaves `.env` unchanged:
 
