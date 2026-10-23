@@ -1,6 +1,6 @@
 # Milestone 1 acceptance evidence
 
-Task 20 verification, 2026-10-22; fix-wave verification, 2026-10-23. **The final whole-branch review is done: "ready to merge with fixes".** Its required and recommended fixes (I1, I2, M1, M2, M3, M8, M9) were applied in this fix wave, which closes I1's lint and format debt. **Re-review of the fix wave and controller acceptance are pending.** Task tests passing alone does not complete milestone acceptance.
+Task 20 verification, 2026-10-22; fix-wave verification, 2026-10-23. **The final whole-branch review is done: "ready to merge with fixes".** Its required and recommended fixes (I1, I2, M1, M2, M3, M8, M9) were applied in this fix wave, which closes I1's lint and format debt. **The scoped re-review of the fix wave found every finding addressed and no new breakage. The plan's Verification section was then re-run at the fix-wave HEAD: every AC command, the full suites (754 passed, zero skipped), Playwright (12 passed), smoke, ruff check and format, and the no-paid-calls checks all passed.**
 
 ## Reproducible results
 
@@ -20,7 +20,7 @@ Fix-wave run at the fix-wave HEAD, with the Compose stack rebuilt from that HEAD
 
 ## Acceptance coverage
 
-The combined backend run and the browser suite include the following checks. This is tested coverage, subject to the pending re-review.
+The combined backend run and the browser suite include the following checks. This is tested coverage.
 
 | AC | Evidence |
 | --- | --- |
