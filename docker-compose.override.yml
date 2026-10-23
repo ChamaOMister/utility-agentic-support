@@ -1,0 +1,6 @@
+# Automatically applied by `docker compose` for local/Codespaces demonstrations.
+# Production-like base: docker compose -f docker-compose.yml up --build
+services:
+  mock-billing:
+    environment:
+      FAULT_INJECTION_ENABLED: "true"

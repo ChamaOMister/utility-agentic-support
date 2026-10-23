@@ -1,0 +1,8 @@
+{
+  "enabledPlugins": {
+    "superpowers@anthropic-plugin-directory": true,
+    "design@anthropic-plugin-directory": true,
+    "data@anthropic-plugin-directory": true,
+    "claude-security@anthropic-plugin-directory": true
+  }
+}

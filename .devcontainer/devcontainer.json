@@ -1,0 +1,15 @@
+{
+  "name": "utility-agentic-support",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "20" },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "forwardPorts": [5173, 8000, 8001],
+  "portsAttributes": {
+    "5173": { "label": "web" },
+    "8000": { "label": "support-api" },
+    "8001": { "label": "mock-billing" }
+  },
+  "postCreateCommand": "python3.12 -m venv .venv && .venv/bin/pip install -e 'services/mock_billing[dev]' -e 'services/support_api[dev]'"
+}
