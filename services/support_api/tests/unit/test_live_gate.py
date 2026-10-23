@@ -66,24 +66,28 @@ def _entry(data):
 
 
 # --- gate -------------------------------------------------------------------
-def test_committed_config_keeps_gate_closed(settings_live_with_key):
-    failures = live_gate_failures(
-        settings_live_with_key, Pricing.load(PRICING), ModelsConfig.load(MODELS)
-    )
-    assert set(failures) == {
-        "pricing_unverified",
-        "token_count_not_verified_unbilled",
-        "model_reasoning_unverified",
-    }
+def test_committed_config_opens_gate_only_with_flag_and_key(
+    monkeypatch, settings_live_with_key
+):
+    pricing, models = Pricing.load(PRICING), ModelsConfig.load(MODELS)
+    assert live_gate_failures(settings_live_with_key, pricing, models) == []
+    # Shipped defaults stay offline: the flag and the key are the human switches.
+    assert live_gate_failures(make_settings(monkeypatch), pricing, models) == [
+        "live_disabled",
+        "missing_api_key",
+    ]
 
 
-def test_committed_config_files_are_unverified_placeholders():
-    # Guards against anyone flipping the shipped placeholders.
-    assert (
-        json.loads(PRICING.read_text())["models"]["gpt-6-luna"]["default"]["verified"]
-        is False
-    )
-    assert json.loads(MODELS.read_text())["gpt-6-luna"]["verified"] is False
+def test_committed_config_records_official_provenance():
+    entry = json.loads(PRICING.read_text())["models"]["gpt-6-luna"]["default"]
+    model = json.loads(MODELS.read_text())["gpt-6-luna"]
+    token_count = json.loads(PRICING.read_text())["token_count"]
+    for record in (entry, model, token_count):
+        assert record["source_url"].startswith("https://developers.openai.com/")
+        assert record["verified_on"] == "2026-10-23"
+    # Counting is undocumented, so the shipped config takes the billed (reserving) side.
+    assert token_count["billed"] is True
+    assert Pricing.load(PRICING).token_count_billed() is True
 
 
 def test_fully_verified_fixture_opens_gate(
@@ -114,19 +118,34 @@ def test_empty_secret_object_counts_as_missing(monkeypatch, verified_fixture_fil
     assert live_gate_failures(s, *verified_fixture_files) == ["missing_api_key"]
 
 
-def test_everything_off_reports_all_reasons_in_stable_order(monkeypatch):
+def test_everything_off_reports_all_reasons_in_stable_order(monkeypatch, tmp_path):
+    p = _mutated(
+        FIXTURE_PRICING,
+        tmp_path,
+        "p.json",
+        lambda d: (
+            _entry(d).update(verified=False),
+            d["token_count"].update(billed=None),
+        ),
+    )
+    m = _mutated(
+        FIXTURE_MODELS,
+        tmp_path,
+        "m.json",
+        lambda d: d["gpt-6-luna"].update(verified=False),
+    )
     s = make_settings(monkeypatch)
-    assert live_gate_failures(s, Pricing.load(PRICING), ModelsConfig.load(MODELS)) == [
+    assert live_gate_failures(s, Pricing.load(p), ModelsConfig.load(m)) == [
         "live_disabled",
         "missing_api_key",
         "pricing_unverified",
-        "token_count_not_verified_unbilled",
+        "token_count_billing_unverified",
         "model_reasoning_unverified",
     ]
 
 
-@pytest.mark.parametrize("billed", [True, None])
-def test_billed_or_unknown_counting_closes_gate(
+@pytest.mark.parametrize("billed", [True, False])
+def test_recorded_counting_billing_opens_gate(
     billed, tmp_path, settings_live_with_key, verified_fixture_files
 ):
     p = _mutated(
@@ -135,10 +154,41 @@ def test_billed_or_unknown_counting_closes_gate(
         "p.json",
         lambda d: d["token_count"].update(billed=billed),
     )
+    pricing = Pricing.load(p)
+    assert pricing.token_count_billed() is billed
+    assert (
+        live_gate_failures(settings_live_with_key, pricing, verified_fixture_files[1])
+        == []
+    )
+
+
+@pytest.mark.parametrize("billed", [None, "true", 1, "", [], {}])
+def test_unknown_counting_billing_closes_gate(
+    billed, tmp_path, settings_live_with_key, verified_fixture_files
+):
+    p = _mutated(
+        FIXTURE_PRICING,
+        tmp_path,
+        "p.json",
+        lambda d: d["token_count"].update(billed=billed),
+    )
+    assert Pricing.load(p).token_count_billed() is None
     failures = live_gate_failures(
         settings_live_with_key, Pricing.load(p), verified_fixture_files[1]
     )
-    assert failures == ["token_count_not_verified_unbilled"]
+    assert failures == ["token_count_billing_unverified"]
+
+
+@pytest.mark.parametrize("field", ["source_url", "verified_on"])
+@pytest.mark.parametrize("billed", [True, False])
+def test_counting_billing_without_provenance_is_unknown(field, billed, tmp_path):
+    p = _mutated(
+        FIXTURE_PRICING,
+        tmp_path,
+        "p.json",
+        lambda d: d["token_count"].update({"billed": billed, field: None}),
+    )
+    assert Pricing.load(p).token_count_billed() is None
 
 
 @pytest.mark.parametrize("billed", ["false", 0, "", [], {}])
@@ -254,8 +304,15 @@ def test_rate_none_unless_every_field_is_verified(patch, tmp_path):
     assert Pricing.load(p).rate("gpt-6-luna", "default") is None
 
 
-def test_committed_pricing_has_no_rate():
-    assert Pricing.load(PRICING).rate("gpt-6-luna", "default") is None
+def test_committed_pricing_rates():
+    pricing = Pricing.load(PRICING)
+    assert pricing.rate("gpt-6-luna", "default") == Rate(
+        Decimal("0.10"), Decimal("0.50"), Decimal("0.01")
+    )
+    assert pricing.rate("gpt-6-luna", "flex") == Rate(
+        Decimal("0.05"), Decimal("0.25"), Decimal("0.005")
+    )
+    assert ModelsConfig.load(MODELS).reasoning_items("gpt-6-luna") == "current_turn"
 
 
 # --- ModelsConfig -----------------------------------------------------------

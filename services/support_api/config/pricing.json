@@ -2,14 +2,27 @@
   "models": {
     "gpt-6-luna": {
       "default": {
-        "input_per_mtok": null,
-        "cached_input_per_mtok": null,
-        "output_per_mtok": null,
-        "source_url": null,
-        "verified_on": null,
-        "verified": false
+        "input_per_mtok": 0.10,
+        "cached_input_per_mtok": 0.01,
+        "output_per_mtok": 0.50,
+        "source_url": "https://developers.openai.com/api/docs/pricing",
+        "verified_on": "2026-10-23",
+        "verified": true
+      },
+      "flex": {
+        "input_per_mtok": 0.05,
+        "cached_input_per_mtok": 0.005,
+        "output_per_mtok": 0.25,
+        "source_url": "https://developers.openai.com/api/docs/pricing",
+        "verified_on": "2026-10-23",
+        "verified": true
       }
     }
   },
-  "token_count": {"billed": null, "source_url": null, "verified_on": null}
+  "token_count": {
+    "billed": true,
+    "note": "OpenAI does not document whether POST /v1/responses/input_tokens is billed. Treated as billed at the model's input rate: every count is reserved and settled in the ledger.",
+    "source_url": "https://developers.openai.com/api/docs/guides/token-counting",
+    "verified_on": "2026-10-23"
+  }
 }

@@ -2,13 +2,15 @@
 
 Pinned openai 3.36.1 exposes ``client.responses.input_tokens.count``; counting uses that
 SDK method (POST /v1/responses/input_tokens). Clients inject legacy httpx.AsyncClient
-and disable SDK retries. The application startup gate verifies counting is unbilled.
+and disable SDK retries. The startup gate requires counting billing to be recorded; when it
+is recorded as billed, every count is reserved and settled like a generation.
 """
 
 from __future__ import annotations
 
 import asyncio
 import copy
+import json
 import time
 from decimal import Decimal
 
@@ -44,8 +46,12 @@ from support_api.usage.classify import (
 )
 from support_api.usage.pricing import Pricing, Rate
 
-# The counting endpoint rejects these generation-only fields.
-_GENERATION_ONLY = frozenset({"max_output_tokens", "store", "service_tier", "include"})
+# The counting endpoint rejects these generation-only fields. Reasoning effort shapes output only.
+_GENERATION_ONLY = frozenset(
+    {"max_output_tokens", "store", "service_tier", "include", "reasoning"}
+)
+# Headroom over the request's UTF-8 size when bounding a count before its result is known.
+_COUNT_RESERVE_HEADROOM_TOKENS = 1000
 _BLOCK_UNKNOWN = text(
     "UPDATE support.conversations SET live_blocked_reason = 'provider_outcome_unknown' "
     "WHERE id = :c AND live_blocked_reason IS NULL"
@@ -68,6 +74,8 @@ class OpenAIResponsesModel:
         attempt_timeout_s: float = 20,
         conversation_cap_usd: Decimal = Decimal("0.10"),
         pricing: Pricing | None = None,
+        count_billed: bool = False,
+        reasoning_effort: str | None = None,
     ) -> None:
         if client.max_retries != 0:
             raise ValueError("OpenAIResponsesModel requires SDK max_retries=0")
@@ -81,12 +89,14 @@ class OpenAIResponsesModel:
         self._attempt_timeout_s = attempt_timeout_s
         self._conversation_cap_usd = conversation_cap_usd
         self._pricing = pricing
+        self._count_billed = count_billed
+        self._reasoning_effort = reasoning_effort
 
     async def aclose(self) -> None:
         await self._client.close()
 
     def build_generation_body(self, req: ModelRequest) -> dict:
-        return {
+        body = {
             "model": self.name,
             "instructions": req.instructions,
             "input": list(req.input),
@@ -97,6 +107,9 @@ class OpenAIResponsesModel:
             "service_tier": self._tier,
             "include": ["reasoning.encrypted_content"],
         }
+        if self._reasoning_effort is not None:
+            body["reasoning"] = {"effort": self._reasoning_effort}
+        return body
 
     def build_count_body(self, req: ModelRequest) -> dict:
         return {
@@ -109,8 +122,27 @@ class OpenAIResponsesModel:
         ctx.counted_request = ctx.input_tokens = ctx.counted_model = None
         counted_request = copy.deepcopy(request)
         body = self.build_count_body(counted_request)
+        call_id = None
+        if self._count_billed:
+            # Billed counting gets its own ledger row, reserved before the request can be sent.
+            try:
+                async with fenced(self._db, ctx.claim) as conn:
+                    call_id = await reserve(
+                        conn,
+                        ctx.claim,
+                        amount=count_reservation_usd(body, self._rate),
+                        kind="token_count",
+                        model=self.name,
+                        tier=self._tier,
+                        attempt=1,
+                        conversation_cap_usd=self._conversation_cap_usd,
+                    )
+            except BudgetExceeded as exc:
+                raise ModelUnavailable("live_blocked") from exc
+        started = time.monotonic()
         try:
             await pre_send(self._db, ctx.claim, ctx.deadline, ctx.checkpoints)
+            started = time.monotonic()
             timeout = ctx.deadline.timeout(self._count_timeout_s)
             async with asyncio.timeout(timeout):
                 result = await self._client.responses.input_tokens.count(
@@ -120,10 +152,17 @@ class OpenAIResponsesModel:
             if type(tokens) is not int or tokens < 0:
                 raise ValueError("invalid input token count")
         except ClaimLost:
-            raise
+            raise  # a reserved count row stays held for recovery
         except DeadlineExpired as exc:
+            if call_id is not None:
+                async with fenced(self._db, ctx.claim) as conn:
+                    await release(
+                        conn, ctx.claim, call_id, outcome_class="deadline_expired"
+                    )
             raise ModelUnavailable("limit_reached") from exc
         except Exception as exc:
+            if call_id is not None:
+                await self._close_failed_count(ctx, call_id, exc, started)
             ctx.trace.append(
                 {
                     "kind": "token_count",
@@ -136,6 +175,9 @@ class OpenAIResponsesModel:
                 }
             )
             raise ModelUnavailable("upstream_unavailable") from exc
+        cost = None
+        if call_id is not None:
+            cost = await self._settle_count(ctx, call_id, result, tokens, started)
         ctx.trace.append(
             {
                 "kind": "token_count",
@@ -143,7 +185,7 @@ class OpenAIResponsesModel:
                 "service_tier": None,
                 "input_tokens": tokens,
                 "output_tokens": None,
-                "estimated_cost_usd": None,
+                "estimated_cost_usd": None if cost is None else str(cost),
                 "outcome_class": "completed",
             }
         )
@@ -151,6 +193,57 @@ class OpenAIResponsesModel:
         ctx.input_tokens = tokens
         ctx.counted_model = self.name
         return tokens
+
+    async def _settle_count(
+        self, ctx: ModelContext, call_id, result, tokens: int, started: float
+    ) -> Decimal | None:
+        """Settle a billed count at the input rate; a zero count is released (nothing billed)."""
+        metadata = {
+            "latency_ms": int((time.monotonic() - started) * 1000),
+            "provider_request_id": getattr(result, "_request_id", None),
+        }
+        if tokens == 0:
+            async with fenced(self._db, ctx.claim) as conn:
+                await release(
+                    conn, ctx.claim, call_id, outcome_class="settled", **metadata
+                )
+            return None
+        usage = Usage(tokens, 0, 0)
+        # Unfenced like generation settlement: the count belongs to this worker's own call.
+        await settle(
+            self._db,
+            call_id,
+            usage,
+            self._rate,
+            outcome_class="settled",
+            service_tier=self._tier,
+            **metadata,
+        )
+        return actual_usd(usage, self._rate)
+
+    async def _close_failed_count(
+        self, ctx: ModelContext, call_id, exc: Exception, started: float
+    ) -> None:
+        """Never-sent counts are released; anything else stays uncertain without blocking."""
+        decision, request_id, _ = _classify_exception(exc)
+        metadata = {
+            "latency_ms": int((time.monotonic() - started) * 1000),
+            "provider_request_id": request_id,
+        }
+        async with fenced(self._db, ctx.claim) as conn:
+            if decision.ledger == "release":
+                await release(
+                    conn,
+                    ctx.claim,
+                    call_id,
+                    outcome_class=decision.outcome,
+                    **metadata,
+                )
+            else:
+                # A failed count blocks only this turn; the next turn counts again.
+                await mark_uncertain(
+                    conn, ctx.claim, call_id, decision.outcome, None, **metadata
+                )
 
     def _response_rate(self, tier: str | None) -> Rate | None:
         if not isinstance(tier, str):
@@ -290,6 +383,16 @@ class OpenAIResponsesModel:
                 await asyncio.sleep(delay)
             # A fresh reservation and pre-send gate check ownership after any backoff.
         raise ModelUnavailable("upstream_unavailable")
+
+
+def count_reservation_usd(body: dict, rate: Rate) -> Decimal:
+    """Upper bound for a billed count: one input token per UTF-8 byte of the body, plus headroom.
+
+    Text tokens span at least one byte, so the bound holds without a local tokenizer; settlement
+    then charges the provider's actual count.
+    """
+    size = len(json.dumps(body, ensure_ascii=False).encode("utf-8"))
+    return worst_case_usd(size + _COUNT_RESERVE_HEADROOM_TOKENS, 0, rate)
 
 
 def _text_or_none(value) -> str | None:
