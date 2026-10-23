@@ -1,6 +1,6 @@
 # Utility agentic support
 
-A PT-BR chat demonstration for **Vértice Energia**, a fictional utility. Milestone 1 runs entirely offline from OpenAI: the scripted model calls a real support API, synthetic billing API, and Postgres. No OpenAI key is needed.
+A PT-BR chat demonstration for **Vértice Energia**, a fictional utility. By default it runs offline: a scripted model calls a real support API, synthetic billing API, and Postgres, and no OpenAI key is needed. [Live mode](#live-mode-openai) swaps in OpenAI `gpt-6-luna` behind a budget-capped gate.
 
 ## Start in a fresh Codespace
 
@@ -11,6 +11,8 @@ scripts/init-env.sh
 docker compose up --build -d
 scripts/smoke.sh
 ```
+
+After a Codespace restart, `scripts/demo-up.sh` does all of this in one step: it checks container networking (see [troubleshooting](docs/troubleshooting.md#containers-cannot-reach-the-database-after-a-codespace-restart)), rebuilds, starts, and runs smoke.
 
 Open **port 5173** from the Codespaces Ports panel. Locally, open <http://localhost:5173>. `init-env.sh` generates random local secrets and the exact browser origin in the ignored `.env`; it refuses to overwrite an existing file. On later starts, retain `.env` and run only the last two commands. The first image build depends on network access for dependencies; smoke waits at most 120 seconds after startup for all four services. It checks native Postgres readiness and HTTP 200 for the other three services.
 
@@ -34,6 +36,21 @@ Compose automatically loads `docker-compose.override.yml`, enabling authenticate
 ```
 
 Supported route names: `verify`, `account`, `list_bills`, `bill_detail`. Effects: `timeout`, `http_500`, `unavailable` (503), `delay_ms:500`. Omit `customer_ref` for a whole route; verification has no customer path and requires an unscoped rule. Rules are process-local and first-match. To run the base configuration with fault administration disabled, explicitly use `docker compose -f docker-compose.yml up --build -d`.
+
+## Live mode (OpenAI)
+
+Live mode sends real, paid requests. Before switching it on:
+
+1. In the OpenAI dashboard, use a dedicated project with a **hard monthly spend limit** and an alert (see [provider controls](docs/provider-controls.md)). The app's own ledger (`PROJECT_BUDGET_USD`, default 20; `CONVERSATION_BUDGET_USD`, default 0.10) is an estimate, not a guaranteed cap.
+2. Create an API key in that project and add it to `.env` yourself, by editing the file: `OPENAI_API_KEY=sk-...` (no quotes). Never paste it into chat, issues or commits.
+3. Switch modes; the script rebuilds and restarts only the support API:
+
+```sh
+scripts/set-mode.sh live      # LLM_PROVIDER=openai, LIVE_LLM_ENABLED=true
+scripts/set-mode.sh offline   # back to the scripted model at any time
+```
+
+If live startup fails, the script switches back to offline automatically and points to `docker compose logs support-api`. In live mode the offline badge disappears and the debug drawer shows each token count and generation with its tokens and estimated cost. Optional `.env` settings: `OPENAI_CHAT_MODEL` (default `gpt-6-luna`; other models need verified entries in `services/support_api/config/`), `OPENAI_REASONING_EFFORT` (default `low`; `none`/`low`/`medium` suit the 800-token output cap), and the two budget variables. [Provider controls](docs/provider-controls.md) explains how to watch spend and reconcile uncertain rows.
 
 ## Verify changes
 
@@ -69,4 +86,4 @@ subprocess.run(['docker', 'compose', 'up', '-d', '--build'], env=env, check=True
 PY
 ```
 
-[Acceptance evidence](docs/milestone-1-report.md), [troubleshooting](docs/troubleshooting.md), and [provider controls and live prerequisites](docs/provider-controls.md) describe operational limits. Logs and the drawer exclude payloads, but the database retains raw synthetic messages, tool arguments/results, and opaque reasoning for history replay. A live model would receive the knowledge answers typed in chat. Keep this milestone restricted to synthetic data.
+[Acceptance evidence](docs/milestone-1-report.md), [troubleshooting](docs/troubleshooting.md), and [provider controls and live prerequisites](docs/provider-controls.md) describe operational limits. Logs and the drawer exclude payloads, but the database retains raw synthetic messages, tool arguments/results, and opaque reasoning for history replay. A live model would receive the knowledge answers typed in chat. Keep this demo restricted to synthetic data.

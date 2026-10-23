@@ -41,6 +41,7 @@ async def model(db, verified_live_config, openai_mock):
         max_output_tokens=800,
         pricing=verified_live_config[2],
         conversation_cap_usd=Decimal("0.10"),
+        count_billed=False,  # generation-path tests; billed counting: test_live_prereqs.py
     )
     yield model
     await model.aclose()

@@ -1,6 +1,8 @@
 """Live-gate prerequisites: billed token counting, the single project cap, money CHECKs."""
 
+import asyncio
 from decimal import Decimal
+from uuid import uuid4
 
 import httpx
 import openai
@@ -13,7 +15,7 @@ from support_api.agent.models.openai_model import (
     count_reservation_usd,
 )
 from support_api.deadline import Deadline
-from support_api.usage.budget import sync_project_cap
+from support_api.usage.budget import recover_reservations, sync_project_cap
 
 from tests.conftest import (
     conv_budget,
@@ -164,13 +166,96 @@ async def test_billed_count_expired_deadline_releases_unsent_hold(
     assert row.status == "released" and row.outcome_class == "deadline_expired"
 
 
-async def test_billed_zero_count_is_released_not_settled(
+async def test_billed_zero_count_is_malformed_and_uncertain(
     billed_model, request_body, ctx, openai_mock, db
 ):
     openai_mock.count_returns([0])
-    assert await billed_model.count_input_tokens(request_body, ctx) == 0
+    with pytest.raises(ModelUnavailable, match="upstream_unavailable"):
+        await billed_model.count_input_tokens(request_body, ctx)
     row = await only_llm_call(db, ctx.claim, kind="token_count")
-    assert row.status == "released" and row.estimated_usd is None
+    assert row.status == "uncertain" and row.estimated_usd is None
+    assert ctx.input_tokens is None and openai_mock.route("responses").call_count == 0
+
+
+@pytest.mark.parametrize(
+    ("status", "code", "error_type", "reason"),
+    [
+        (401, "invalid_api_key", "invalid_request_error", "provider_rejected"),
+        (400, None, "invalid_request_error", "provider_rejected"),
+        (429, "insufficient_quota", "insufficient_quota", "provider_quota"),
+        (429, "project_spend_limit_exceeded", "insufficient_quota", "provider_quota"),
+    ],
+)
+async def test_deterministic_count_failure_blocks_live_mode(
+    billed_model, request_body, ctx, openai_mock, db, status, code, error_type, reason
+):
+    openai_mock.route("input_tokens").respond(
+        status, json={"error": {"type": error_type, "code": code, "message": "x"}}
+    )
+    with pytest.raises(ModelUnavailable, match="upstream_unavailable"):
+        await billed_model.count_input_tokens(request_body, ctx)
+    assert (
+        await only_llm_call(db, ctx.claim, kind="token_count")
+    ).status == "uncertain"
+    assert await live_blocked_reason(db, ctx.claim) == reason
+    assert openai_mock.route("responses").call_count == 0
+
+
+async def test_claim_lost_after_count_reserve_keeps_hold_for_recovery(
+    billed_model, request_body, ctx, openai_mock, db, pause_at
+):
+    from support_api.turns.claim import ClaimLost
+
+    from tests.conftest import take_over
+
+    gate = pause_at("after_count_reserve")
+    task = asyncio.create_task(billed_model.count_input_tokens(request_body, ctx))
+    await asyncio.wait_for(gate.reached.wait(), 10)
+    await take_over(db, ctx.claim)
+    gate.release()
+    with pytest.raises(ClaimLost):
+        await asyncio.wait_for(task, 10)
+    assert openai_mock.call_count == 0
+    row = await only_llm_call(db, ctx.claim, kind="token_count")
+    assert row.status == "reserved"  # §5.5 recovery moves it to uncertain and blocks
+    async with db.begin() as conn:
+        await conn.execute(
+            text("SELECT 1 FROM support.conversations WHERE id = :c FOR UPDATE"),
+            {"c": ctx.claim.conversation_id},
+        )
+        assert (
+            await recover_reservations(
+                conn, ctx.claim.conversation_id, ctx.claim.turn_id
+            )
+            == 1
+        )
+    assert (
+        await only_llm_call(db, ctx.claim, kind="token_count")
+    ).status == "uncertain"
+    assert await live_blocked_reason(db, ctx.claim) is not None
+
+
+async def test_billed_counting_through_the_app_keeps_ledger_sums(
+    live_app_factory, verified_live_config, openai_mock, db
+):
+    verified_live_config[0]["token_count"]["billed"] = True  # the shipped setting
+    api = await live_app_factory()
+    assert api.model._count_billed is True
+    p_before = (await project_budget(db)).spent_usd
+    for message in ("olá", "obrigado"):
+        body = (await api.send(uuid4(), message)).json()
+        assert body["status"] == "completed", body
+    counts = await llm_calls(db, api.conversation_id, kind="token_count")
+    gens = await llm_calls(db, api.conversation_id)
+    assert [r.status for r in counts] == ["settled", "settled"]
+    assert all(r.estimated_usd > 0 for r in counts)
+    assert [r.status for r in gens] == ["settled", "settled"]
+    total = sum(r.estimated_usd for r in [*counts, *gens])
+    conv = await conv_budget(db, api.conversation_id)
+    assert (
+        conv.spent_usd == total and conv.reserved_usd == 0 and conv.uncertain_usd == 0
+    )
+    assert (await project_budget(db)).spent_usd - p_before == total
 
 
 def test_count_reservation_bounds_the_body_size(verified_live_config):
@@ -183,13 +268,14 @@ def test_count_reservation_bounds_the_body_size(verified_live_config):
 
 
 # --- reasoning effort -----------------------------------------------------------
-async def test_reasoning_effort_sent_on_generation_only(
+async def test_reasoning_effort_sent_on_count_and_generation(
     billed_model, request_body, ctx, openai_mock
 ):
     await billed_model.count_input_tokens(request_body, ctx)
     await billed_model.generate(request_body, ctx)
     assert openai_mock.captured_all("responses")[0]["reasoning"] == {"effort": "low"}
-    assert "reasoning" not in openai_mock.captured_all("input_tokens")[0]
+    # The count endpoint accepts reasoning, so the counted request matches the generated one.
+    assert openai_mock.captured_all("input_tokens")[0]["reasoning"] == {"effort": "low"}
 
 
 def test_no_reasoning_effort_omits_the_field(db, verified_live_config, request_body):

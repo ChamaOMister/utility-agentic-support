@@ -63,7 +63,7 @@ class Settings(BaseSettings):
 
     # Budgets (money is Decimal; stored as NUMERIC(12,6)). PROJECT_BUDGET_USD is the single source of
     # the project cap: startup writes it to budget_accounts (the migration only seeds the row).
-    project_budget_usd: Decimal = Field(default=Decimal(20), ge=0)
+    project_budget_usd: Decimal = Field(default=Decimal(20), ge=0, le=Decimal(999999))
     conversation_budget_usd: Decimal = Decimal("0.10")
 
     @field_validator("openai_api_key", mode="before")

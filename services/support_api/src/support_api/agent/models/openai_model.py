@@ -46,10 +46,8 @@ from support_api.usage.classify import (
 )
 from support_api.usage.pricing import Pricing, Rate
 
-# The counting endpoint rejects these generation-only fields. Reasoning effort shapes output only.
-_GENERATION_ONLY = frozenset(
-    {"max_output_tokens", "store", "service_tier", "include", "reasoning"}
-)
+# The counting endpoint rejects these generation-only fields; it accepts ``reasoning``.
+_GENERATION_ONLY = frozenset({"max_output_tokens", "store", "service_tier", "include"})
 # Headroom over the request's UTF-8 size when bounding a count before its result is known.
 _COUNT_RESERVE_HEADROOM_TOKENS = 1000
 _BLOCK_UNKNOWN = text(
@@ -74,7 +72,7 @@ class OpenAIResponsesModel:
         attempt_timeout_s: float = 20,
         conversation_cap_usd: Decimal = Decimal("0.10"),
         pricing: Pricing | None = None,
-        count_billed: bool = False,
+        count_billed: bool = True,
         reasoning_effort: str | None = None,
     ) -> None:
         if client.max_retries != 0:
@@ -139,27 +137,37 @@ class OpenAIResponsesModel:
                     )
             except BudgetExceeded as exc:
                 raise ModelUnavailable("live_blocked") from exc
-        started = time.monotonic()
+            await ctx.checkpoints.hit("after_count_reserve")
         try:
             await pre_send(self._db, ctx.claim, ctx.deadline, ctx.checkpoints)
-            started = time.monotonic()
+        except ClaimLost:
+            raise  # a reserved count row stays held for recovery
+        except Exception as exc:
+            # Nothing was sent: release the hold (if any) and end the turn.
+            if call_id is not None:
+                async with fenced(self._db, ctx.claim) as conn:
+                    await release(
+                        conn,
+                        ctx.claim,
+                        call_id,
+                        outcome_class="deadline_expired"
+                        if isinstance(exc, DeadlineExpired)
+                        else "not_sent",
+                    )
+            if isinstance(exc, DeadlineExpired):
+                raise ModelUnavailable("limit_reached") from exc
+            raise ModelUnavailable("upstream_unavailable") from exc
+        started = time.monotonic()
+        try:
             timeout = ctx.deadline.timeout(self._count_timeout_s)
             async with asyncio.timeout(timeout):
                 result = await self._client.responses.input_tokens.count(
                     **body, timeout=timeout
                 )
             tokens = result.input_tokens
-            if type(tokens) is not int or tokens < 0:
+            # Every real request has instructions, so a zero count is a malformed response.
+            if type(tokens) is not int or tokens < 1:
                 raise ValueError("invalid input token count")
-        except ClaimLost:
-            raise  # a reserved count row stays held for recovery
-        except DeadlineExpired as exc:
-            if call_id is not None:
-                async with fenced(self._db, ctx.claim) as conn:
-                    await release(
-                        conn, ctx.claim, call_id, outcome_class="deadline_expired"
-                    )
-            raise ModelUnavailable("limit_reached") from exc
         except Exception as exc:
             if call_id is not None:
                 await self._close_failed_count(ctx, call_id, exc, started)
@@ -196,18 +204,8 @@ class OpenAIResponsesModel:
 
     async def _settle_count(
         self, ctx: ModelContext, call_id, result, tokens: int, started: float
-    ) -> Decimal | None:
-        """Settle a billed count at the input rate; a zero count is released (nothing billed)."""
-        metadata = {
-            "latency_ms": int((time.monotonic() - started) * 1000),
-            "provider_request_id": getattr(result, "_request_id", None),
-        }
-        if tokens == 0:
-            async with fenced(self._db, ctx.claim) as conn:
-                await release(
-                    conn, ctx.claim, call_id, outcome_class="settled", **metadata
-                )
-            return None
+    ) -> Decimal:
+        """Settle a billed count at the model's input rate (tokens is at least 1 here)."""
         usage = Usage(tokens, 0, 0)
         # Unfenced like generation settlement: the count belongs to this worker's own call.
         await settle(
@@ -217,19 +215,30 @@ class OpenAIResponsesModel:
             self._rate,
             outcome_class="settled",
             service_tier=self._tier,
-            **metadata,
+            latency_ms=int((time.monotonic() - started) * 1000),
+            provider_request_id=getattr(result, "_request_id", None),
         )
         return actual_usd(usage, self._rate)
 
     async def _close_failed_count(
         self, ctx: ModelContext, call_id, exc: Exception, started: float
     ) -> None:
-        """Never-sent counts are released; anything else stays uncertain without blocking."""
+        """Never-sent counts are released; anything else stays uncertain.
+
+        Deterministic failures (quota, 4xx rejection) block live mode like generation does, so later
+        turns stop resending a count that would fail again. Transient ones (5xx, timeout, malformed,
+        rate limit) end only this turn.
+        """
         decision, request_id, _ = _classify_exception(exc)
         metadata = {
             "latency_ms": int((time.monotonic() - started) * 1000),
             "provider_request_id": request_id,
         }
+        block = (
+            decision.block_reason
+            if decision.outcome in (OutcomeClass.QUOTA, OutcomeClass.REJECTED)
+            else None
+        )
         async with fenced(self._db, ctx.claim) as conn:
             if decision.ledger == "release":
                 await release(
@@ -240,9 +249,8 @@ class OpenAIResponsesModel:
                     **metadata,
                 )
             else:
-                # A failed count blocks only this turn; the next turn counts again.
                 await mark_uncertain(
-                    conn, ctx.claim, call_id, decision.outcome, None, **metadata
+                    conn, ctx.claim, call_id, decision.outcome, block, **metadata
                 )
 
     def _response_rate(self, tier: str | None) -> Rate | None:
