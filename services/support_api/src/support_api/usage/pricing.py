@@ -141,6 +141,18 @@ class Pricing:
         tc = self._token_count
         return tc.get("billed") is False and _has_provenance(tc)
 
+    def token_count_billed(self) -> bool | None:
+        """Recorded billing of token counting: True/False with provenance, else None (unknown).
+
+        ``True`` means counts are reserved and settled at the model's input rate, the safe reading
+        when the provider does not document the endpoint as free.
+        """
+        tc = self._token_count
+        billed = tc.get("billed")
+        if isinstance(billed, bool) and _has_provenance(tc):
+            return billed
+        return None
+
 
 class ModelsConfig:
     def __init__(self, models: dict[str, dict[str, Any]]):
@@ -177,6 +189,7 @@ def live_gate_failures(
     """Reasons the live gate is closed, in a stable order. Empty list means open.
 
     Mirrors §5.6 items 1-4. Every check is evaluated (no short-circuit) so callers see all reasons.
+    Token counting may be recorded as billed: the model then reserves and settles each count.
     """
     failures: list[str] = []
     if not settings.live_llm_enabled:
@@ -186,8 +199,8 @@ def live_gate_failures(
         failures.append("missing_api_key")
     if pricing.rate(settings.openai_chat_model, settings.openai_service_tier) is None:
         failures.append("pricing_unverified")
-    if not pricing.token_count_unbilled():
-        failures.append("token_count_not_verified_unbilled")
+    if pricing.token_count_billed() is None:
+        failures.append("token_count_billing_unverified")
     if models.reasoning_items(settings.openai_chat_model) is None:
         failures.append("model_reasoning_unverified")
     return failures

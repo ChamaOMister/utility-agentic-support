@@ -1,4 +1,4 @@
-"""Regenerate the bundled startup/offline fallback from the central PT-BR catalog.
+"""Regenerate the bundled startup/offline fallback from the central English catalog.
 
 Run with .venv/bin/python scripts/export-ui-catalog.py after editing UI_MESSAGES.
 The parity test prevents a stale snapshot from passing the backend suite.

@@ -353,10 +353,22 @@ included), only when **all** hold. Otherwise startup fails fast with a clear mes
 2. `config/pricing.json` has a **verified** entry for `(OPENAI_CHAT_MODEL, OPENAI_SERVICE_TIER)`: input and
    output rates per million tokens, `source_url`, `verified_on` date, `verified: true`. Placeholder or
    unverified entries do not satisfy the gate.
-3. Token counting is verified **unbilled**: `pricing.json` records `token_count: {billed: false,
-   source_url, verified_on}`. Billed or unknown → gate closed. Milestone 1 does not support billed counting,
-   because counts, recounts and failed counts are sent before any reservation. Supporting it would need a
-   separate reservation-before-send path for count requests.
+3. Token counting billing is **recorded**: `pricing.json` has `token_count: {billed: true|false,
+   source_url, verified_on}`. Unknown (missing, non-boolean or without provenance) → gate closed.
+   `billed: false` sends counts with no ledger row. `billed: true` (rev 5, the shipped setting, because
+   OpenAI does not document the endpoint as free) gives every count its own `llm_calls` row of kind
+   `token_count`:
+   - **Reserve** before sending, in one fenced transaction against both caps, an upper bound of one input
+     token per UTF-8 byte of the JSON count body plus 1,000 tokens, priced at the uncached input rate. If a
+     cap would be exceeded, no count is sent and the turn ends with the live-blocked message.
+   - **Pre-send gate** as for generation. A lost claim keeps the row `reserved` for recovery (§5.5 step 3
+     moves it to `uncertain` and blocks). Any other failure before sending releases the hold.
+   - **Settle** a successful count (`input_tokens ≥ 1`) at the input rate for the reported tokens. A zero or
+     malformed count is a malformed response.
+   - **Failures after a possible send**: connect failures (never sent) release. 429 quota/billing and
+     400/401/403 leave the hold `uncertain` and block live mode (`provider_quota` / `provider_rejected`), as
+     for generation. 5xx, timeouts, rate limits and malformed results leave the hold `uncertain` without
+     blocking: only that turn ends, and the operator reconciles the row (see provider controls).
 4. `config/models.json` has a verified entry for `OPENAI_CHAT_MODEL` giving its `reasoning_items` setting
    (`none` | `current_turn` | `all_turns`, with `source_url` and `verified_on`; §5.4.1).
 
@@ -497,14 +509,14 @@ Milestone 1 is accepted when all of these pass:
 **Blocking for enabling live generation** (each is a live-gate check in §5.6; not blocking for Milestone 1
 acceptance, which runs on mocks):
 
-- Verify pricing for the selected model **and** processing tier from official OpenAI pricing; record
-  `source_url` and `verified_on` in `pricing.json`.
-- Confirm from an official source that `POST /v1/responses/input_tokens` is unbilled (OpenAI's
-  token-counting guide does not say), and note its rate limits. If it is billed, live generation stays off
-  until a reservation path for count requests is designed.
-- Confirm the selected model's cross-turn reasoning behavior (`none` / `current_turn` / `all_turns`) and
-  record it in `config/models.json`. The reasoning guide already confirms that stateless responses carry
-  encrypted reasoning items for replay; the model-specific default still needs confirming.
+- ~~Verify pricing for the selected model and processing tier.~~ Rev 5: `gpt-6-luna` default and flex
+  rates recorded from the official pricing page on 2026-10-23.
+- ~~Confirm that `POST /v1/responses/input_tokens` is unbilled.~~ Rev 5: still undocumented (checked
+  2026-10-23), so counts are treated as billed and reserved (§5.6 gate item 3). Its rate limits remain
+  undocumented.
+- ~~Confirm the selected model's cross-turn reasoning behavior.~~ Rev 5: the reasoning guide lists only
+  GPT-5.6 models and GPT-6.1 Sol as supporting `all_turns`; `gpt-6-luna` is recorded as `current_turn`
+  (2026-10-23). The first live calls should confirm it with the count endpoint.
 
 **Non-blocking:**
 
@@ -538,3 +550,11 @@ acceptance, which runs on mocks):
   - §5.5 adds the pre-send gate (claim re-check plus a local deadline check, with total-time-capped requests)
     and documents the residual stall race that fencing can't close without receiver-side token checks.
   - AC 13 is scoped to pauses before a pre-send gate; the residual race is excluded from it explicitly.
+- **Rev 5 (2026-10-23), opening the live gate:**
+  - §5.6 gate item 3 now accepts billed token counting, with a reservation path for count requests (reserve,
+    pre-send gate, settle, release or uncertain, and blocking for deterministic failures).
+  - §8 blocking items resolved: verified `gpt-6-luna` pricing and reasoning replay; counting treated as billed.
+  - `PROJECT_BUDGET_USD` (Settings) is the single source of the project cap: startup writes it to
+    `budget_accounts`. Migration 0003 adds non-negative CHECK constraints to every money and token column.
+  - `OPENAI_REASONING_EFFORT` (default `low`) is sent on count and generation requests.
+  - Live mode still needs `LLM_PROVIDER=openai`, `LIVE_LLM_ENABLED=true` and a key, all set by the owner.

@@ -14,7 +14,7 @@ def wrong_credentials(persona, identifier):
     return (
         persona_creds_text(persona)
         .replace(persona_creds_text(persona).split(",")[0], f"CPF {identifier}")
-        .replace(f"final {persona['phone'][-4:]}", "final 0000")
+        .replace(f"ending {persona['phone'][-4:]}", "ending 0000")
     )
 
 

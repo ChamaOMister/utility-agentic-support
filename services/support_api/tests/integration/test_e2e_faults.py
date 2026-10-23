@@ -27,7 +27,7 @@ async def test_billing_faults_recoverable(
     assert verified.json()["trace"]["tool_calls"][0]["status"] == "ok"
     await set_fault("list_bills", persona["customer_ref"], effect)
     started = time.monotonic()
-    response = await api.send(uuid4(), "minhas faturas")
+    response = await api.send(uuid4(), "my bills")
     elapsed = time.monotonic() - started
     assert response.status_code == 200
     body = response.json()
@@ -43,7 +43,7 @@ async def test_billing_faults_recoverable(
 
     # Recoverability means this verified conversation succeeds after clearing the outage.
     await set_fault()
-    recovered = await api.send(uuid4(), "minhas faturas")
+    recovered = await api.send(uuid4(), "my bills")
     assert recovered.status_code == 200
     assert "R$" in recovered.json()["reply"]
     assert recovered.json()["trace"]["tool_calls"][-1]["error_code"] is None

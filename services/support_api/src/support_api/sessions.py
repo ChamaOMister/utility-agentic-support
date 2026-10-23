@@ -10,6 +10,7 @@ exist (no ownership oracle). A same-origin caller that sends a valid Origin stil
 """
 
 import hashlib
+import logging
 import secrets
 from dataclasses import dataclass
 from datetime import datetime
@@ -118,6 +119,10 @@ async def current_session(request: Request) -> BrowserSession:
 async def require_json_and_origin(request: Request) -> None:
     origin = request.headers.get("origin")
     if origin is None or origin not in request.app.state.settings.allowed_origins:
+        # The rejected value is what to add to ALLOWED_ORIGINS (proxies may rewrite it).
+        logging.getLogger("support_api.sessions").warning(
+            "origin_not_allowed: %r", origin
+        )
         raise OriginNotAllowed
     media_type = (
         request.headers.get("content-type", "").split(";", 1)[0].strip().lower()

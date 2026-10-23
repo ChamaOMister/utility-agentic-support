@@ -382,3 +382,22 @@ async def recover_reservations(
     await _move(conn, conversation_id, reserved=-moved.total, uncertain=moved.total)
     await conn.execute(_BLOCK, {"r": INTERRUPTED_REASON, "c": conversation_id})
     return moved.n
+
+
+_SYNC_PROJECT_CAP = text(
+    "UPDATE support.budget_accounts SET cap_usd = :cap WHERE id = 'project' RETURNING id"
+)
+
+
+async def sync_project_cap(db: Database, cap_usd: Decimal) -> None:
+    """Make ``PROJECT_BUDGET_USD`` (Settings) the project cap; the migration only seeds the row.
+
+    Lowering the cap below what is already spent or held is allowed: reservations then fail.
+    """
+    if not cap_usd.is_finite() or cap_usd < 0:
+        raise ValueError("project budget must be a non-negative finite Decimal")
+    async with db.begin() as conn:
+        if (
+            await conn.execute(_SYNC_PROJECT_CAP, {"cap": _ceil6(cap_usd)})
+        ).first() is None:
+            raise RuntimeError("project budget account is missing; run migrations")

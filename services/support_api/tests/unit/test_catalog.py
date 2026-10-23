@@ -18,24 +18,19 @@ def test_catalog_has_all_keys():
 
 
 def test_message_lookup_and_unknown_key():
-    assert message("offline_badge") == "Modo offline — respostas simuladas"
+    assert message("offline_badge") == "Offline mode — simulated replies"
     with pytest.raises(KeyError):
         message("nope")
 
 
-def test_config_placeholders_keep_live_gate_closed():
-    import json
+def test_shipped_defaults_keep_live_mode_off():
+    # The provider config is verified; the human switches (flag, key) stay off by default.
+    from support_api.settings import Settings
 
-    from tests.conftest import SERVICE_DIR
-
-    pricing = json.loads((SERVICE_DIR / "config" / "pricing.json").read_text())
-    models = json.loads((SERVICE_DIR / "config" / "models.json").read_text())
-    assert pricing["models"]["gpt-6-luna"]["default"]["verified"] is False
-    assert pricing["token_count"]["billed"] is None
-    assert (
-        models["gpt-6-luna"]["verified"] is False
-        and models["gpt-6-luna"]["reasoning_items"] is None
-    )
+    fields = Settings.model_fields
+    assert fields["llm_provider"].default == "scripted"
+    assert fields["live_llm_enabled"].default is False
+    assert fields["openai_api_key"].default is None
 
 
 def test_web_fallback_snapshot_matches_the_central_catalog():

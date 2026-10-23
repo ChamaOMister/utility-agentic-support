@@ -24,6 +24,7 @@ from .logging import CorrelationIdMiddleware
 from .settings import Settings
 from .tools.executor import Executor
 from .turns.recovery import startup_sweep
+from .usage.budget import sync_project_cap
 from .usage.pricing import LiveGateClosed, ModelsConfig, Pricing, live_gate_failures
 
 _CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
@@ -69,6 +70,8 @@ def create_app(
             attempt_timeout_s=settings.llm_attempt_s,
             conversation_cap_usd=settings.conversation_budget_usd,
             pricing=pricing,
+            count_billed=pricing.token_count_billed(),
+            reasoning_effort=settings.openai_reasoning_effort,
         )
     else:
         chat_model = ScriptedModel()
@@ -92,6 +95,7 @@ def create_app(
     async def lifespan(_: FastAPI):
         try:
             await startup_sweep(db)  # recover turns abandoned by a previous process
+            await sync_project_cap(db, settings.project_budget_usd)
             yield
         finally:
             if owned_model is not None:

@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     demo_data_endpoint_enabled: bool = True
     # System instructions; a relative path is resolved against the working directory, then the
     # service directory (services/support_api).
-    system_prompt_path: Path = Path("prompts/system_ptbr.md")
+    system_prompt_path: Path = Path("prompts/system_en.md")
 
     # Model provider. LIVE_LLM_ENABLED stays false unless a human flips it; the gate in §5.6 also
     # needs verified pricing/model config, which ships as placeholders.
@@ -35,6 +35,10 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("OPENAI_CHAT_MODEL", "OPENAI_MODEL"),
     )
     openai_service_tier: str = "default"
+    # Low effort keeps support replies fast and leaves the 800-token output cap for the answer.
+    openai_reasoning_effort: (
+        Literal["none", "low", "medium", "high", "xhigh", "max"] | None
+    ) = "low"
 
     # Per-turn limits (§5.4)
     max_model_calls: int = 5
@@ -57,14 +61,20 @@ class Settings(BaseSettings):
     verification_slot_ttl_s: int = 30
     verification_ttl_s: int = 1800
 
-    # Budgets (money is Decimal; stored as NUMERIC(12,6))
-    project_budget_usd: Decimal = Decimal(20)
+    # Budgets (money is Decimal; stored as NUMERIC(12,6)). PROJECT_BUDGET_USD is the single source of
+    # the project cap: startup writes it to budget_accounts (the migration only seeds the row).
+    project_budget_usd: Decimal = Field(default=Decimal(20), ge=0, le=Decimal(999999))
     conversation_budget_usd: Decimal = Decimal("0.10")
 
     @field_validator("openai_api_key", mode="before")
     @classmethod
     def _empty_key_is_none(cls, v):
         return None if v in ("", None) else v
+
+    @field_validator("openai_reasoning_effort", mode="before")
+    @classmethod
+    def _empty_effort_is_default(cls, v):
+        return "low" if v == "" else v
 
     @field_validator("allowed_origins", mode="before")
     @classmethod

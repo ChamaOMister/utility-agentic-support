@@ -41,6 +41,7 @@ async def model(db, verified_live_config, openai_mock):
         max_output_tokens=800,
         pricing=verified_live_config[2],
         conversation_cap_usd=Decimal("0.10"),
+        count_billed=False,  # generation-path tests; billed counting: test_live_prereqs.py
     )
     yield model
     await model.aclose()
@@ -56,7 +57,7 @@ def ctx(claimed_conversation, fake_clock, checkpoint_hub):
 @pytest.fixture
 def request_body():
     return ModelRequest(
-        "Responda em português.",
+        "Reply in English.",
         ({"type": "message", "role": "user", "content": "olá"},),
         (),
     )
@@ -368,7 +369,7 @@ async def test_takeover_before_send_sends_no_generation(
 ):
     api = api_live_mocked
     gate = pause_at(checkpoint, nth=nth)
-    a = asyncio.create_task(api.send(uuid4(), "minhas faturas"))
+    a = asyncio.create_task(api.send(uuid4(), "my bills"))
     await asyncio.wait_for(gate.reached.wait(), 10)
     fake_clock.advance(61)
     await expire_lease(db, api.conversation_id)
@@ -422,7 +423,7 @@ async def test_tool_call_round_trip_and_usage_settlement(
         ]
     )
     api = api_live_mocked
-    result = (await api.send(uuid4(), "minhas faturas")).json()
+    result = (await api.send(uuid4(), "my bills")).json()
     assert result["status"] == "completed" and result["reply"] == "Certo!"
     assert result["trace"]["tool_calls"][0]["error_code"] == "authentication_required"
     second = openai_mock.captured_all("responses")[1]["input"]
@@ -551,7 +552,7 @@ async def test_tool_round_trip_through_billing(
             httpx.Response(200, json=provider_response()),
         ]
     )
-    response = await api_live_mocked.send(uuid4(), "minhas faturas")
+    response = await api_live_mocked.send(uuid4(), "my bills")
     assert response.json()["status"] == "completed"
     assert [t["status"] for t in response.json()["trace"]["tool_calls"]] == ["ok", "ok"]
     assert (

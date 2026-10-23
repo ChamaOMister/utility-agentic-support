@@ -53,8 +53,14 @@ services:
       BILLING_API_KEY: ${BILLING_API_KEY:?run scripts/init-env.sh first}
       IDENTIFIER_HASH_KEY: ${IDENTIFIER_HASH_KEY:?run scripts/init-env.sh first}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
-      LLM_PROVIDER: scripted
-      LIVE_LLM_ENABLED: "false"
+      # Offline by default. Live mode needs all three in .env plus the verified config (README).
+      LLM_PROVIDER: ${LLM_PROVIDER:-scripted}
+      LIVE_LLM_ENABLED: ${LIVE_LLM_ENABLED:-false}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-6-luna}
+      OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-low}
+      PROJECT_BUDGET_USD: ${PROJECT_BUDGET_USD:-20}
+      CONVERSATION_BUDGET_USD: ${CONVERSATION_BUDGET_USD:-0.10}
       DEMO_DATA_ENDPOINT_ENABLED: "true"
       PERSONAS_PATH: /data/synthetic/personas.json
     volumes:

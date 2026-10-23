@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
+import Reply from './Reply';
+import VerifyIdentity from './VerifyIdentity';
 
-export default function ChatPanel({ui, turns, busy, ready, submit, retry}) {
+export default function ChatPanel({ui, turns, busy, ready, submit, retry, prefill}) {
   const [text, setText] = useState('');
   const input = useRef(null);
   const bottom = useRef(null);
@@ -23,7 +25,7 @@ export default function ChatPanel({ui, turns, busy, ready, submit, retry}) {
       {turns.map(turn => <React.Fragment key={turn.client_message_id}>
         <article className="message user"><span className="speaker">{ui.you}</span><p data-testid="user-message">{turn.text}</p></article>
         {(turn.reply || turn.retry) && <article className="message assistant"><span className="speaker">{ui.assistant}</span>
-          {turn.reply ? <p data-testid="assistant-reply">{turn.reply}</p>
+          {turn.reply ? <Reply text={turn.reply} />
             : <p className="pending" data-testid="pending-reply" role="status">{ui.sending}</p>}
           {turn.retry && <button type="button" className="retry-button" disabled={busy || !ready} onClick={() => retry(turn)}>{ui.retry}</button>}
         </article>}
@@ -39,5 +41,6 @@ export default function ChatPanel({ui, turns, busy, ready, submit, retry}) {
         <button type="submit" disabled={!ready || busy || !text.trim() || length > 2000} aria-label={ui.send}><span>{ui.send}</span><span aria-hidden="true">↗</span></button></div>
       <div className="composer-hint"><p id="message-hint">{length > 2000 ? ui.too_long : ui.message_hint}</p><span aria-hidden="true">{length}/2000</span></div>
     </form>
+    <VerifyIdentity ui={ui} disabled={!ready || busy} submit={submit} prefill={prefill} />
   </section>;
 }

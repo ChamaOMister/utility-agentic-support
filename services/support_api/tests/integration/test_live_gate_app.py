@@ -12,11 +12,11 @@ from tests.conftest import persona_creds_text
 
 
 async def test_disabled_live_mode_sends_zero_requests(api, personas, openai_mock):
-    assert (await api.send(uuid4(), "minhas faturas")).json()["status"] == "completed"
+    assert (await api.send(uuid4(), "my bills")).json()["status"] == "completed"
     assert (await api.send(uuid4(), persona_creds_text(personas[0]))).json()[
         "status"
     ] == "completed"
-    result = (await api.send(uuid4(), "minhas faturas")).json()
+    result = (await api.send(uuid4(), "my bills")).json()
     assert result["status"] == "completed"
     assert result["trace"]["tool_calls"][-1]["name"] == "list_bills"
     assert openai_mock.call_count == 0
@@ -28,7 +28,7 @@ async def test_disabled_live_mode_sends_zero_requests(api, personas, openai_mock
         "live_disabled",
         "missing_key",
         "pricing_unverified",
-        "token_count_billed",
+        "token_count_without_provenance",
         "token_count_unknown",
         "reasoning_unverified",
     ],
@@ -43,8 +43,10 @@ def test_gate_closed_fails_startup_without_client(
         live_settings = live_settings.model_copy(update={"openai_api_key": None})
     elif override == "pricing_unverified":
         pricing["models"]["gpt-6-luna"]["default"]["verified"] = False
-    elif override.startswith("token_count"):
-        pricing["token_count"]["billed"] = True if override.endswith("billed") else None
+    elif override == "token_count_without_provenance":
+        pricing["token_count"].update(billed=True, source_url=None)
+    elif override == "token_count_unknown":
+        pricing["token_count"]["billed"] = None
     else:
         models["gpt-6-luna"]["verified"] = False
     with (
@@ -94,7 +96,7 @@ async def test_runtime_config_directory_used_in_installed_app(
                 "llm_provider": "openai",
                 "live_llm_enabled": True,
                 "openai_api_key": SecretStr("sk-test-not-real"),
-                "system_prompt_path": SERVICE_DIR / "prompts" / "system_ptbr.md",
+                "system_prompt_path": SERVICE_DIR / "prompts" / "system_en.md",
             }
         )
     )

@@ -24,6 +24,20 @@ If conversations disappear or return 404, inspect the browser's cookie storage f
 
 A failed smoke command returns nonzero if the database is missing/unhealthy even when API liveness responds. `SMOKE_TIMEOUT_SECONDS` can lower the smoke budget for diagnostics (integer 1–120); it cannot raise the 120-second cap. A build that is still downloading dependencies must finish before starting smoke.
 
+## Containers cannot reach the database after a Codespace restart
+
+Symptoms: mock billing or the support API stays `unhealthy`, and its logs show `connection timeout expired` connecting to `db`. In this Codespace image the legacy iptables `FORWARD` policy can come back as `DROP` after a restart, which blocks traffic between containers. `scripts/demo-up.sh` detects it; `scripts/demo-up.sh --fix-network` applies the fix and restarts the stack:
+
+```sh
+sudo iptables-legacy -P FORWARD ACCEPT
+```
+
+This changes a host-wide firewall policy inside the Codespace VM only. If Docker then reports a corrupted build cache (`failed to extract layer`, `parent snapshot ... does not exist`), run `docker builder prune -af` (cached layers only; database volumes are kept) and start again. A container whose writable layer is gone (`RWLayer ... unexpectedly nil`) needs `docker compose rm -sf` before `up`; named volumes are kept.
+
+## Live mode problems
+
+`scripts/set-mode.sh live` refuses to run without a non-empty, unquoted `OPENAI_API_KEY` in `.env`, and when a live-related variable is exported in your shell (Compose would prefer it over `.env`). If the support API exits with `live mode gate is closed: ...`, the listed reasons name the missing switch or config entry; the script has already switched back to offline. In a live conversation, "Não foi possível concluir sua solicitação no momento" replies with `provider_rejected` (bad or revoked key) or `provider_quota` (provider spend limit reached) in the debug drawer block live generation for that conversation; fix the cause, then start a new conversation. A conversation that reaches its `CONVERSATION_BUDGET_USD` cap shows the live-blocked message; start a new one.
+
 ## Authentication or upstream errors
 
 Three wrong knowledge checks within 15 minutes lock the conversation and normalized identifier for 15 minutes across browser sessions. Punctuation or a new cookie does not bypass the lock. Lockout, incorrect answers, and occupied verification slots deliberately show the same message. Wait for expiry or use another synthetic persona.
