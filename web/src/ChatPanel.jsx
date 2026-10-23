@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import Reply from './Reply';
 import VerifyIdentity from './VerifyIdentity';
 
 export default function ChatPanel({ui, turns, busy, ready, submit, retry, prefill}) {
@@ -24,7 +25,7 @@ export default function ChatPanel({ui, turns, busy, ready, submit, retry, prefil
       {turns.map(turn => <React.Fragment key={turn.client_message_id}>
         <article className="message user"><span className="speaker">{ui.you}</span><p data-testid="user-message">{turn.text}</p></article>
         {(turn.reply || turn.retry) && <article className="message assistant"><span className="speaker">{ui.assistant}</span>
-          {turn.reply ? <p data-testid="assistant-reply">{turn.reply}</p>
+          {turn.reply ? <Reply text={turn.reply} />
             : <p className="pending" data-testid="pending-reply" role="status">{ui.sending}</p>}
           {turn.retry && <button type="button" className="retry-button" disabled={busy || !ready} onClick={() => retry(turn)}>{ui.retry}</button>}
         </article>}

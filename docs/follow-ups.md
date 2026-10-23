@@ -30,9 +30,18 @@ non-technical customer reads at a glance.
 
 Decide which before building. Whatever is chosen should look the same in offline (scripted) mode.
 
+**Status.** Option 1 is built: `web/src/Reply.jsx` renders bold text, lists and simple tables as React
+elements (model text never becomes HTML). Still to do: Playwright coverage for the rendered table, and
+the bill-card option if wanted later.
+
 ## 2. Codespaces rewrites the browser's Origin header
 
 In a Codespace, chat requests reach `support-api` with `Origin: https://localhost:5173`, not the
 Codespace URL. `scripts/init-env.sh` writes only the Codespace URL to `ALLOWED_ORIGINS`, so a fresh
 `.env` makes every chat message fail with 403 `origin_not_allowed`. Add `https://localhost:5173` (and
 `http://localhost:5173`) to the generated list.
+
+VS Code desktop port forwarding can also pick another local port when 5173 is busy (seen:
+`http://127.0.0.1:5174`). The support API now logs each rejected value
+(`origin_not_allowed: '<origin>'`), so `docker compose logs support-api | grep origin_not_allowed`
+shows exactly what to add.

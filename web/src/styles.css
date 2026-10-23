@@ -216,6 +216,55 @@ h4 {
   background:#f1f4ec;
   color:#243c32;
 }
+.reply {
+  padding:.85rem 1rem;
+  border-radius:3px 12px 12px 12px;
+  background:#f1f4ec;
+  color:#243c32;
+  display:flex;
+  flex-direction:column;
+  gap:.6rem;
+}
+.message .reply p {
+  padding:0;
+  background:none;
+  border-radius:0;
+}
+.reply ul, .reply ol {
+  margin:0;
+  padding-left:1.2rem;
+}
+.reply li + li {
+  margin-top:.25rem;
+}
+.reply strong {
+  font-weight:650;
+  color:#17392b;
+}
+.reply-table {
+  overflow-x:auto;
+}
+.reply table {
+  border-collapse:collapse;
+  font-size:.82rem;
+  min-width:100%;
+}
+.reply th, .reply td {
+  padding:.4rem .75rem;
+  border-bottom:1px solid #dde3d6;
+  text-align:left;
+  white-space:nowrap;
+}
+.reply th {
+  font-size:.7rem;
+  font-weight:600;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  color:#657568;
+}
+.reply tbody tr:last-child td {
+  border-bottom:none;
+}
 .message.user {
   align-self:flex-end;
 }
