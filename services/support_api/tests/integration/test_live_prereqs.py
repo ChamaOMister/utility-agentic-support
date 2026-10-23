@@ -61,7 +61,7 @@ def ctx(claimed_conversation, fake_clock, checkpoint_hub):
 @pytest.fixture
 def request_body():
     return ModelRequest(
-        "Responda em português.",
+        "Reply in English.",
         ({"type": "message", "role": "user", "content": "olá"},),
         (),
     )

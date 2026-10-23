@@ -38,16 +38,16 @@ async def test_logs_have_correlation_ids_and_no_persona_values(
     for persona in personas:
         api = await live_billing_api_factory()
         secrets.add(api.http.cookies.get("uas_session"))
-        responses.append(await api.send(uuid4(), "minhas faturas"))
+        responses.append(await api.send(uuid4(), "my bills"))
         verified = await api.send(uuid4(), persona_creds_text(persona))
         responses.append(verified)
         assert verified.status_code == 200
-        bills = await api.send(uuid4(), "minhas faturas")
+        bills = await api.send(uuid4(), "my bills")
         responses.append(bills)
         assert bills.status_code == 200 and "R$" in bills.json()["reply"]
         if persona is personas[-1]:
             await set_fault("list_bills", persona["customer_ref"], "unavailable")
-            failed = await api.send(uuid4(), "minhas faturas")
+            failed = await api.send(uuid4(), "my bills")
             responses.append(failed)
             assert failed.json()["reply"] == MESSAGES["upstream_unavailable"]
     records = [json.loads(line) for line in caplog_json.getvalue().splitlines()]

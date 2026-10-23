@@ -12,11 +12,11 @@ from tests.conftest import persona_creds_text
 
 
 async def test_disabled_live_mode_sends_zero_requests(api, personas, openai_mock):
-    assert (await api.send(uuid4(), "minhas faturas")).json()["status"] == "completed"
+    assert (await api.send(uuid4(), "my bills")).json()["status"] == "completed"
     assert (await api.send(uuid4(), persona_creds_text(personas[0]))).json()[
         "status"
     ] == "completed"
-    result = (await api.send(uuid4(), "minhas faturas")).json()
+    result = (await api.send(uuid4(), "my bills")).json()
     assert result["status"] == "completed"
     assert result["trace"]["tool_calls"][-1]["name"] == "list_bills"
     assert openai_mock.call_count == 0
@@ -96,7 +96,7 @@ async def test_runtime_config_directory_used_in_installed_app(
                 "llm_provider": "openai",
                 "live_llm_enabled": True,
                 "openai_api_key": SecretStr("sk-test-not-real"),
-                "system_prompt_path": SERVICE_DIR / "prompts" / "system_ptbr.md",
+                "system_prompt_path": SERVICE_DIR / "prompts" / "system_en.md",
             }
         )
     )

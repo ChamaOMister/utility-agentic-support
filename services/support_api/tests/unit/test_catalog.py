@@ -18,7 +18,7 @@ def test_catalog_has_all_keys():
 
 
 def test_message_lookup_and_unknown_key():
-    assert message("offline_badge") == "Modo offline — respostas simuladas"
+    assert message("offline_badge") == "Offline mode — simulated replies"
     with pytest.raises(KeyError):
         message("nope")
 

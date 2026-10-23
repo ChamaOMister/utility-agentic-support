@@ -89,7 +89,7 @@ def conv() -> list[TurnItems]:
 
     def t2(t):
         return [
-            user("minhas faturas", t, 0),
+            user("my bills", t, 0),
             reasoning("m", t, 1),
             call("c1", t, 2),
             output("c1", t, 3),
@@ -143,10 +143,7 @@ def test_no_orphans_and_interrupted_tools_omitted(mode):
     check_tool_pairs(items)
     assert not any(i.get("call_id") == "c3" for i in items)
     assert texts(items).count(INTERRUPTED) == 1
-    assert (
-        INTERRUPTED
-        == "Não foi possível concluir sua mensagem. Envie novamente para tentar outra vez."
-    )
+    assert INTERRUPTED == "We couldn't finish your message. Send it again to retry."
 
 
 def test_failed_turn_contributes_only_messages():

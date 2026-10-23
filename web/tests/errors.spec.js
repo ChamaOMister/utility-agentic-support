@@ -4,23 +4,23 @@ import { send, lastReply, fulfill, inProgress, interrupted } from './helpers.js'
 test('409 shows the in-progress message, not a crash', async ({ page }) => {
   await page.route('**/messages', route => fulfill(route, {error: 'turn_in_progress', message: inProgress}, 409));
   await page.goto('/');
-  await send(page, 'Minhas faturas');
+  await send(page, 'My bills');
   await expect(lastReply(page)).toHaveText(inProgress);
-  await expect(page.getByLabel('Sua mensagem')).toBeEnabled();
+  await expect(page.getByLabel('Your message')).toBeEnabled();
 });
 
 test('interrupted reply offers explicit retry with a new id', async ({ page }) => {
   const requests = [];
   await page.route('**/messages', route => {
     requests.push(route.request().postDataJSON());
-    return fulfill(route, {status: requests.length === 1 ? 'interrupted' : 'completed', reply: requests.length === 1 ? interrupted : 'Resposta recuperada.', trace: {tool_calls: [], model_calls: []}});
+    return fulfill(route, {status: requests.length === 1 ? 'interrupted' : 'completed', reply: requests.length === 1 ? interrupted : 'Reply recovered.', trace: {tool_calls: [], model_calls: []}});
   });
   await page.goto('/');
-  await send(page, 'Quero ver minhas faturas');
+  await send(page, 'I want to see my bills');
   await expect(lastReply(page)).toHaveText(interrupted);
   expect(requests).toHaveLength(1);
-  await page.getByRole('button', {name: 'Tentar novamente', exact: true}).click();
-  await expect(lastReply(page)).toHaveText('Resposta recuperada.');
+  await page.getByRole('button', {name: 'Try again', exact: true}).click();
+  await expect(lastReply(page)).toHaveText('Reply recovered.');
   expect(requests).toHaveLength(2);
   expect(requests[0].client_message_id).not.toBe(requests[1].client_message_id);
   expect(requests[0].text).toBe(requests[1].text);
@@ -38,7 +38,7 @@ test('lost response retries the same client id without duplicate transcript entr
     return route.continue();
   });
   await page.goto('/');
-  await send(page, 'Quero ver minhas faturas');
+  await send(page, 'I want to see my bills');
   await expect(lastReply(page)).toContainText('CPF');
   expect(requests).toHaveLength(2);
   expect(requests[0]).toEqual(requests[1]);
@@ -49,7 +49,7 @@ test('lost response retries the same client id without duplicate transcript entr
 
 test('debug drawer renders only explicit metadata fields, never nested payloads', async ({ page }) => {
   await page.route('**/messages', route => fulfill(route, {
-    status: 'completed', reply: 'Mensagem do cliente sintético.',
+    status: 'completed', reply: 'Synthetic customer message.',
     trace: {
       user_text: 'PRIVATE_USER_TEXT',
       tool_calls: [{name: 'list_bills', status: 'ok', error_code: null, attempts: 1, duration_ms: 12, record_count: 2, arguments: 'PRIVATE_ARGUMENTS', result: 'PRIVATE_RESULT'}],
@@ -62,18 +62,18 @@ test('debug drawer renders only explicit metadata fields, never nested payloads'
   const drawer = page.getByTestId('debug-metadata');
   await expect(drawer).toContainText('ac923faa-86ec-441f-ae91-91acac452721');
   for (const value of ['list_bills', 'demo-model', '0.000123', 'record_count', 'outcome_class']) await expect(drawer).toContainText(value);
-  for (const value of ['PRIVATE_USER_TEXT', 'PRIVATE_ARGUMENTS', 'PRIVATE_RESULT', 'PRIVATE_MODEL_PAYLOAD', 'Mensagem do cliente']) await expect(drawer).not.toContainText(value);
+  for (const value of ['PRIVATE_USER_TEXT', 'PRIVATE_ARGUMENTS', 'PRIVATE_RESULT', 'PRIVATE_MODEL_PAYLOAD', 'Synthetic customer']) await expect(drawer).not.toContainText(value);
 });
 
 test('health failure is visible and can be retried', async ({ page }) => {
   let unavailable = true;
   await page.route('**/api/health', route => unavailable ? fulfill(route, {}, 503) : route.continue());
   await page.goto('/');
-  await expect(page.getByRole('alert')).toContainText('Não foi possível conectar');
+  await expect(page.getByRole('alert')).toContainText("We couldn't connect");
   unavailable = false;
-  await page.getByRole('button', {name: 'Tentar novamente', exact: true}).click();
-  await expect(page.getByText('Modo offline — respostas simuladas')).toBeVisible();
-  await send(page, 'Olá');
+  await page.getByRole('button', {name: 'Try again', exact: true}).click();
+  await expect(page.getByText('Offline mode — simulated replies')).toBeVisible();
+  await send(page, 'Hello');
   await expect(lastReply(page)).toContainText('Vértice');
 });
 
@@ -82,15 +82,15 @@ test('exhausted network retry stays recoverable and keeps the original id', asyn
   await page.route('**/messages', route => {
     requests.push(route.request().postDataJSON());
     return requests.length <= 2 ? route.abort('connectionreset') : fulfill(route, {
-      status: 'completed', reply: 'Conexão recuperada.', trace: {tool_calls: [], model_calls: []},
+      status: 'completed', reply: 'Connection recovered.', trace: {tool_calls: [], model_calls: []},
     });
   });
   await page.goto('/');
-  await send(page, 'Minhas faturas');
-  await expect(lastReply(page)).toContainText('Não foi possível conectar');
+  await send(page, 'My bills');
+  await expect(lastReply(page)).toContainText("We couldn't connect");
   expect(requests).toHaveLength(2);
-  await page.getByRole('button', {name: 'Tentar novamente', exact: true}).click();
-  await expect(lastReply(page)).toHaveText('Conexão recuperada.');
+  await page.getByRole('button', {name: 'Try again', exact: true}).click();
+  await expect(lastReply(page)).toHaveText('Connection recovered.');
   expect(requests).toHaveLength(3);
   expect(new Set(requests.map(r => r.client_message_id)).size).toBe(1);
   await expect(page.getByTestId('user-message')).toHaveCount(1);
@@ -114,10 +114,10 @@ test('lost response followed by in-progress replay keeps same-id recovery availa
     return route.continue(); // The real API must replay the completed original turn.
   });
   await page.goto('/');
-  await send(page, 'Quero ver minhas faturas');
+  await send(page, 'I want to see my bills');
   await expect(lastReply(page)).toHaveText(inProgress);
   expect(requests).toHaveLength(2);
-  const retry = page.getByRole('button', {name: 'Tentar novamente', exact: true});
+  const retry = page.getByRole('button', {name: 'Try again', exact: true});
   await expect(retry).toBeVisible();
   await retry.click();
   await expect(lastReply(page)).toHaveText(inProgress);

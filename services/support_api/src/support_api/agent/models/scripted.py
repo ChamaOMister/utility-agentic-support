@@ -1,7 +1,7 @@
-"""Deterministic, rule-based PT-BR model for the offline demo (spec §5.6).
+"""Deterministic, rule-based English model for the offline demo (spec §5.6).
 
 It reads only ``request.input`` and never sends anything anywhere, token counts included. Its tool
-calls go through the real executor and billing client; its text is built from fixed PT-BR templates
+calls go through the real executor and billing client; its text is built from fixed English templates
 plus structured tool data. Tool output is ``untrusted_data``: this module interpolates only fields it
 has parsed into numbers, dates or members of fixed vocabularies, plus a sanitised ``first_name``.
 """
@@ -12,11 +12,12 @@ import json
 import re
 import unicodedata
 import uuid
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from support_api.agent.format_ptbr import format_brl, format_date
+from support_api.agent.format_en import MONTHS, format_brl, format_date, format_month
 from support_api.agent.history import Item, estimate_tokens
 from support_api.agent.models.base import (
     FunctionCall,
@@ -29,23 +30,26 @@ from support_api.catalog import MESSAGES
 # --------------------------------------------------------------------------- fixed texts
 
 ASK_VERIFICATION = (
-    "Para consultar dados da sua conta, preciso confirmar sua identidade. Informe seu CPF ou "
-    "número da conta, sua data de nascimento (dd/mm/aaaa) e os 4 últimos dígitos do telefone "
-    "cadastrado."
+    "To look up your account details, I need to verify your identity. Tap “Verify my identity” "
+    "below the message box, or type your CPF or account number, your date of birth and the last "
+    "4 digits of your phone number."
 )
 GREETING = (
-    "Olá! Sou o assistente virtual da Vértice Energia (empresa fictícia, projeto de demonstração). "
-    "Posso ajudar você a consultar suas faturas em aberto, em atraso ou pagas. Como posso ajudar?"
+    "Hello! I'm the virtual assistant for Vértice Energia (a fictional company, demo project). "
+    "I can help you check your open, overdue or paid bills. How can I help?"
 )
-BILL_NOT_FOUND = "Não encontrei essa fatura. Confira o identificador e tente novamente."
+BILL_NOT_FOUND = "I couldn't find that bill. Please check the bill ID and try again."
 _EMPTY_BILLS = {
-    "open": "Não encontrei faturas em aberto.",
-    "overdue": "Não encontrei faturas em atraso.",
-    "paid": "Não encontrei faturas pagas.",
-    None: "Não encontrei faturas na sua conta.",
+    "open": "I didn't find any open bills.",
+    "overdue": "I didn't find any overdue bills.",
+    "paid": "I didn't find any paid bills.",
+    None: "I didn't find any bills on your account.",
 }
-_BILL_STATUS_PT = {"open": "em aberto", "overdue": "em atraso", "paid": "paga"}
-_ACCOUNT_STATUS_PT = {"active": "ativa"}
+_BILL_STATUS_EN = {"open": "open", "overdue": "overdue", "paid": "paid"}
+_ACCOUNT_STATUS_EN = {"active": "active"}
+_PICK_FROM_CALENDAR = (
+    "tap “Verify my identity” to pick your date of birth from a calendar"
+)
 _ERROR_TEXT = {
     "authentication_failed": MESSAGES["auth_failed"],
     "locked": MESSAGES["auth_failed"],
@@ -66,11 +70,13 @@ def _fold(text: str) -> str:
     return "".join(c for c in decomposed if not unicodedata.combining(c)).casefold()
 
 
-_INTENT = re.compile(r"fatura|conta|boleto|pagar|debito|vencimento")
+_INTENT = re.compile(
+    r"\b(?:bills?|invoices?|account|payments?|pay|due|balance|statements?)\b"
+)
 _STATUS_PATTERNS: dict[str, re.Pattern[str]] = {
-    "open": re.compile(r"\babert[oa]s?\b"),
-    "overdue": re.compile(r"\batras(o|ad[oa]s?)\b|\bvencid[oa]s?\b"),
-    "paid": re.compile(r"\bpag[oa]s?\b|\bquitad[oa]s?\b"),
+    "open": re.compile(r"\b(?:open|unpaid|outstanding|pending)\b"),
+    "overdue": re.compile(r"\b(?:overdue|late|past[\s-]due)\b"),
+    "paid": re.compile(r"\b(?:paid|settled)\b"),
 }
 
 
@@ -81,29 +87,135 @@ def bill_status(text: str) -> str | None:
     return found[0] if len(found) == 1 else None
 
 
-_DATE = re.compile(r"(?<!\d)(\d{1,2})/(\d{1,2})/(\d{4})(?!\d)")
+_MONTH_WORD = r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?"
+_ORDINAL = r"(?:st|nd|rd|th)?"
+# (pattern, order of the year/month/day groups); "M" is a month word, "numeric" is dd/mm or mm/dd.
+_DATE_FORMS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(?<![\d.])(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)"), "ymd"),
+    (
+        re.compile(
+            rf"(?<!\d)(\d{{1,2}}){_ORDINAL}\s+(?:of\s+)?{_MONTH_WORD},?\s+(\d{{4}})(?!\d)",
+            re.IGNORECASE,
+        ),
+        "dMy",
+    ),
+    (
+        re.compile(
+            rf"\b{_MONTH_WORD}\s+(\d{{1,2}}){_ORDINAL},?\s+(\d{{4}})(?!\d)",
+            re.IGNORECASE,
+        ),
+        "Mdy",
+    ),
+    (re.compile(r"(?<![\d.])(\d{1,2})[/.](\d{1,2})[/.](\d{4})(?!\d)"), "numeric"),
+)
+_MONTH_NUMBER = {name[:3].lower(): n for n, name in enumerate(MONTHS, start=1)}
 _PHONE_KEYWORD = re.compile(
-    r"\b(?:telefone|celular)\b[^\d]{0,30}?(?<!\d)(\d{4})(?!\d)", re.IGNORECASE
+    r"\b(?:phone|mobile|cell)\b[^\d]{0,30}?(?<!\d)(\d{4})(?!\d)", re.IGNORECASE
 )
 _IDENTIFIER = re.compile(r"(?<!\d)\d(?:[.\-\s]?\d){9,10}(?!\d)")
 _STANDALONE_4 = re.compile(r"(?<!\d)(\d{4})(?!\d)")
+_BIRTH_KEYWORD = re.compile(r"\b(?:born|birth|dob)\b", re.IGNORECASE)
 
 
 def _blank(text: str, span: tuple[int, int]) -> str:
     return text[: span[0]] + " # " + text[span[1] :]
 
 
-def parse_credentials(text: str) -> dict[str, str] | None:
-    """``authenticate_customer`` arguments found in ``text``; None unless all three are present."""
-    date_match = _DATE.search(text)
-    if date_match is None:
-        return None
-    day, month, year = (int(g) for g in date_match.groups())
+@dataclass(frozen=True)
+class FoundDate:
+    """A date-like span; ``value`` is set only when it names exactly one real date."""
+
+    span: tuple[int, int]
+    value: date | None
+    problem: str | None
+
+
+def _calendar_date(year: int, month: int, day: int) -> date | None:
     try:
-        birth = date(year, month, day)
+        return date(year, month, day)
     except ValueError:
         return None
-    rest = _blank(text, date_match.span())
+
+
+def _impossible(typed: str, year: int, month: int, day: int) -> str:
+    detail = (
+        f"{format_month(year, month)} doesn't have a day {day}"
+        if 1 <= month <= 12
+        else f"there is no month {month}"
+    )
+    return f"{typed} isn't a real date: {detail}. Please check it, or {_PICK_FROM_CALENDAR}."
+
+
+def _read_date(m: re.Match[str], order: str) -> FoundDate:
+    typed = m.group(0)
+    if order == "numeric":
+        first, second, year = (int(g) for g in m.groups())
+        day_first = _calendar_date(year, second, first)
+        month_first = _calendar_date(year, first, second)
+        if day_first and month_first and day_first != month_first:
+            return FoundDate(
+                m.span(),
+                None,
+                f"Just to be sure: does {typed} mean {format_date(day_first)} or "
+                f"{format_date(month_first)}? You can write the month as a word, like "
+                f"“9 February 1989”, or {_PICK_FROM_CALENDAR}.",
+            )
+        if day_first or month_first:
+            return FoundDate(m.span(), day_first or month_first, None)
+        if second <= 12:
+            return FoundDate(m.span(), None, _impossible(typed, year, second, first))
+        return FoundDate(m.span(), None, _impossible(typed, year, first, second))
+    if order == "ymd":
+        year, month, day = (int(g) for g in m.groups())
+    elif order == "dMy":
+        day, month, year = (
+            int(m.group(1)),
+            _MONTH_NUMBER[m.group(2).lower()],
+            int(m.group(3)),
+        )
+    else:  # "Mdy"
+        month, day, year = (
+            _MONTH_NUMBER[m.group(1).lower()],
+            int(m.group(2)),
+            int(m.group(3)),
+        )
+    value = _calendar_date(year, month, day)
+    if value is None:
+        return FoundDate(m.span(), None, _impossible(typed, year, month, day))
+    return FoundDate(m.span(), value, None)
+
+
+def find_date(text: str) -> FoundDate | None:
+    """The first date-like span in ``text`` in any supported spelling, or None."""
+    matches = [(m, order) for p, order in _DATE_FORMS if (m := p.search(text))]
+    if not matches:
+        return None
+    m, order = min(matches, key=lambda pair: pair[0].start())
+    return _read_date(m, order)
+
+
+def date_problem(text: str) -> str | None:
+    """Why a birth date in ``text`` can't be used (impossible or ambiguous), else None.
+
+    Only for messages that look like identity details (an identifier or a birth keyword), so
+    ordinary dates in other questions are left alone.
+    """
+    found = find_date(text)
+    if found is None or found.problem is None:
+        return None
+    rest = _blank(text, found.span)
+    if _IDENTIFIER.search(rest) or _BIRTH_KEYWORD.search(text):
+        return found.problem
+    return None
+
+
+def parse_credentials(text: str) -> dict[str, str] | None:
+    """``authenticate_customer`` arguments found in ``text``; None unless all three are present."""
+    found = find_date(text)
+    if found is None or found.value is None:
+        return None
+    birth = found.value
+    rest = _blank(text, found.span)
 
     phone: str | None = None
     keyword = _PHONE_KEYWORD.search(rest)
@@ -230,24 +342,24 @@ _MONTH = re.compile(r"^(\d{4})-(0[1-9]|1[0-2])$")
 
 def _reference_month(value: Any) -> str | None:
     m = _MONTH.match(value) if isinstance(value, str) else None
-    return f"{m.group(2)}/{m.group(1)}" if m else None
+    return format_month(int(m.group(1)), int(m.group(2))) if m else None
 
 
 def _bill_line(bill: dict) -> str:
     parts: list[str] = []
     month = _reference_month(bill.get("reference_month"))
     if month:
-        parts.append(f"Referência {month}")
+        parts.append(month)
     amount = _parse_decimal(bill.get("amount_brl"))
     if amount is not None:
         parts.append(format_brl(amount))
     due = _parse_date(bill.get("due_date"))
     if due is not None:
-        parts.append(f"vencimento {format_date(due)}")
-    status = _BILL_STATUS_PT.get(bill.get("status"))  # type: ignore[arg-type]
+        parts.append(f"due {format_date(due)}")
+    status = _BILL_STATUS_EN.get(bill.get("status"))  # type: ignore[arg-type]
     if status:
         parts.append(status)
-    return "- " + " — ".join(parts) if parts else "- Fatura sem detalhes disponíveis"
+    return "- " + " — ".join(parts) if parts else "- Bill with no details available"
 
 
 def _summarize_bills(data: Any, args: dict) -> str:
@@ -258,7 +370,7 @@ def _summarize_bills(data: Any, args: dict) -> str:
     bills = [b for b in data if isinstance(b, dict)]
     bills.sort(key=lambda b: 1 if b.get("status") == "paid" else 0)  # stable
     n = len(bills)
-    head = "Encontrei 1 fatura:" if n == 1 else f"Encontrei {n} faturas:"
+    head = "I found 1 bill:" if n == 1 else f"I found {n} bills:"
     return "\n".join([head, *(_bill_line(b) for b in bills)])
 
 
@@ -266,25 +378,26 @@ def _summarize_bill_details(data: Any) -> str:
     if not isinstance(data, dict):
         return MESSAGES["upstream_unavailable"]
     month = _reference_month(data.get("reference_month"))
-    lines = [f"Fatura de {month}:" if month else "Detalhes da fatura:"]
+    lines = [f"Bill for {month}:" if month else "Bill details:"]
     amount = _parse_decimal(data.get("amount_brl"))
     if amount is not None:
-        lines.append(f"- Valor: {format_brl(amount)}")
+        lines.append(f"- Amount: {format_brl(amount)}")
     due = _parse_date(data.get("due_date"))
     if due is not None:
-        lines.append(f"- Vencimento: {format_date(due)}")
-    status = _BILL_STATUS_PT.get(data.get("status"))  # type: ignore[arg-type]
+        lines.append(f"- Due date: {format_date(due)}")
+    status = _BILL_STATUS_EN.get(data.get("status"))  # type: ignore[arg-type]
     if status:
-        lines.append(f"- Situação: {status}")
+        lines.append(f"- Status: {status}")
     issued = _parse_date(data.get("issue_date"))
     if issued is not None:
-        lines.append(f"- Emissão: {format_date(issued)}")
+        lines.append(f"- Issued: {format_date(issued)}")
     kwh = data.get("consumption_kwh")
     if isinstance(kwh, int) and not isinstance(kwh, bool):
-        lines.append(f"- Consumo: {kwh} kWh")
+        lines.append(f"- Consumption: {kwh} kWh")
     items = data.get("line_items")
     if isinstance(items, list) and items:
-        lines.append(f"- A fatura tem {len(items)} itens de cobrança.")
+        n = len(items)
+        lines.append(f"- The bill has {n} line item{'' if n == 1 else 's'}.")
     return "\n".join(lines)
 
 
@@ -296,14 +409,14 @@ def _summarize_account(data: Any) -> str:
     if isinstance(installations, list):
         n = len(installations)
         parts.append(
-            "Sua conta tem 1 instalação."
+            "Your account has 1 installation."
             if n == 1
-            else f"Sua conta tem {n} instalações."
+            else f"Your account has {n} installations."
         )
-    status = _ACCOUNT_STATUS_PT.get(data.get("account_status"))  # type: ignore[arg-type]
+    status = _ACCOUNT_STATUS_EN.get(data.get("account_status"))  # type: ignore[arg-type]
     if status:
-        parts.append(f"A situação da conta é: {status}.")
-    return " ".join(parts) or "Consultei os dados da sua conta."
+        parts.append(f"Account status: {status}.")
+    return " ".join(parts) or "I checked your account details."
 
 
 def _summarize_output(name: str | None, args: dict, status: str, data: Any) -> str:
@@ -396,11 +509,11 @@ class ScriptedModel:
                     if has_bill_intent(_user_text(message)):
                         return _list_bills_response(call_id, _user_text(message))
                 first_name = _safe_first_name(data)
-                greeting = f"Obrigado, {first_name}! " if first_name else "Obrigado! "
+                greeting = f"Thank you, {first_name}! " if first_name else "Thank you! "
                 return _text_response(
                     greeting
-                    + "Sua identidade foi confirmada. Posso ajudar com suas faturas ou "
-                    "com os dados da sua conta?"
+                    + "Your identity is confirmed. Can I help with your bills or "
+                    "your account details?"
                 )
             # Rule 2: any other tool output.
             return _text_response(
@@ -412,6 +525,10 @@ class ScriptedModel:
         creds = parse_credentials(text) if text else None
         if creds is not None:
             return _call_response(call_id, "authenticate_customer", creds)
+        # Rule 3b: identity details with an impossible or ambiguous birth date.
+        problem = date_problem(text) if text else None
+        if problem is not None:
+            return _text_response(problem)
         # Rule 4: bill question after verification.
         if text and has_bill_intent(text) and _auth_ok_outputs(items, calls):
             return _list_bills_response(call_id, text)

@@ -290,6 +290,71 @@ textarea:disabled {
 .composer-hint>span {
   white-space:nowrap;
 }
+.verify-open {
+  padding:0 1.5rem 1.1rem;
+}
+.verify-open-button {
+  display:inline-flex;
+  align-items:center;
+  gap:.5rem;
+  background:#e3eee8;
+  color:#176345;
+  font-size:.78rem;
+}
+.verify-open-button:hover {
+  background:#d3e5da;
+}
+.verify-card {
+  margin:0 1.5rem 1.1rem;
+  border:1px solid #d8e0d5;
+  border-radius:12px;
+  background:#fcfdfb;
+  padding:1rem 1.1rem;
+  display:grid;
+  gap:.75rem;
+}
+.verify-card h3 {
+  margin:0;
+  font-size:.9rem;
+}
+.verify-field label {
+  display:block;
+  font-size:.72rem;
+  font-weight:600;
+  margin-bottom:.3rem;
+}
+.verify-field input {
+  font:inherit;
+  width:100%;
+  min-width:0;
+  border:1px solid #d8e0d5;
+  background:white;
+  border-radius:9px;
+  padding:.6rem .75rem;
+  font-size:.85rem;
+  color:#243c32;
+}
+.verify-field input[aria-invalid="true"] {
+  border-color:#b3412e;
+}
+.verify-error {
+  margin:.3rem 0 0;
+  font-size:.7rem;
+  color:#a03a28;
+}
+.verify-actions {
+  display:flex;
+  justify-content:flex-end;
+  gap:.6rem;
+}
+.verify-cancel {
+  background:transparent;
+  color:#176345;
+  border:1px solid #d8e0d5;
+}
+.verify-cancel:hover {
+  background:#eef3ee;
+}
 .demo-panel {
   background:#eef1e7;
   border:1px solid #dce2d0;
@@ -512,6 +577,12 @@ textarea:disabled {
   }
   .composer {
     padding:1rem;
+  }
+  .verify-open {
+    padding:0 1rem 1rem;
+  }
+  .verify-card {
+    margin:0 1rem 1rem;
   }
   .composer-hint {
     font-size:.6rem;

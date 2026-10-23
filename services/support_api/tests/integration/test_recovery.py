@@ -62,10 +62,10 @@ async def test_crash_after_send(api_live_mocked, db, crash_at):  # AC 12
     crash_at("after_send")
     mid = uuid4()
     with pytest.raises(SimulatedCrash):
-        await api_live_mocked.send(mid, "minhas faturas")
+        await api_live_mocked.send(mid, "my bills")
     assert api_live_mocked.openai_routes["responses"].call_count == 1
     await expire_lease(db, api_live_mocked.conversation_id)
-    replay = await api_live_mocked.send(mid, "minhas faturas")
+    replay = await api_live_mocked.send(mid, "my bills")
     assert replay.status_code == 200 and replay.json()["status"] == "interrupted"
     assert replay.json()["reply"] == MESSAGES["turn_interrupted"]
     call = await only_llm_call(db, api_live_mocked.conversation_id, kind="generation")
@@ -85,7 +85,7 @@ async def test_startup_sweep_recovers_without_request(api_live_mocked, db, crash
     crash_at("after_send")
     mid = uuid4()
     with pytest.raises(SimulatedCrash):
-        await api_live_mocked.send(mid, "minhas faturas")
+        await api_live_mocked.send(mid, "my bills")
     await expire_lease(db, api_live_mocked.conversation_id)
     assert await startup_sweep(db) >= 1
     turn = await turn_by_mid(db, mid)
@@ -209,7 +209,7 @@ async def test_stale_worker_cannot_write(
     # Turn A's first response is a list_bills call; turn B's response is plain text.
     api.model.push(fake_call("call_a", "list_bills"), fake_text("Resposta de B"))
     gate = pause_at("after_model_response", nth=1)
-    a = asyncio.create_task(api.send(uuid4(), "minhas faturas"))
+    a = asyncio.create_task(api.send(uuid4(), "my bills"))
     await asyncio.wait_for(gate.reached.wait(), 10)
     await expire_lease(db, api.conversation_id)
     b = await api.send(uuid4(), "outra pergunta")  # B recovers A's turn and claims

@@ -64,7 +64,9 @@ class AuthenticateArgs(_Args):
         max_length=64,
         description="CPF or account number, exactly as the customer typed it.",
     )
-    birth_date: date = Field(description="Customer birth date, ISO format YYYY-MM-DD.")
+    birth_date: date = Field(
+        description="Customer birth date as YYYY-MM-DD, converted from however the customer wrote it."
+    )
     phone_last4: str = Field(
         pattern=r"^[0-9]{4}$",
         description="Last four digits of the phone number on the account.",

@@ -212,7 +212,7 @@ async def test_turn_limit_30(api, db):
 
 
 async def test_exactly_one_assistant_message_per_turn(api, db, personas):
-    for text in ["minhas faturas", persona_creds_text(personas[0]), "e as pagas?"]:
+    for text in ["my bills", persona_creds_text(personas[0]), "and the paid ones?"]:
         r = await api.send(uuid4(), text)
         assert r.status_code == 200 and r.json()["status"] == "completed"
     assert api.billing_routes["verify"].call_count == 1
@@ -229,7 +229,7 @@ async def test_exactly_one_assistant_message_per_turn(api, db, personas):
 
 
 async def test_completed_turn_state(api, db):
-    r = await api.send(uuid4(), "minhas faturas")
+    r = await api.send(uuid4(), "my bills")
     assert r.json()["reply"] == ASK_VERIFICATION
     (row,) = await turns(db, api.conversation_id)
     assert row.status == "completed" and row.reply == ASK_VERIFICATION
@@ -242,7 +242,7 @@ async def test_completed_turn_state(api, db):
 
 
 async def test_transcript_lists_turns_without_payloads(api, personas):
-    first = await api.send(m1 := uuid4(), "minhas faturas")
+    first = await api.send(m1 := uuid4(), "my bills")
     second = await api.send(m2 := uuid4(), persona_creds_text(personas[0]))
     got = await api.transcript()
     assert got.status_code == 200
@@ -260,7 +260,7 @@ async def test_transcript_lists_turns_without_payloads(api, personas):
         assert t["reply"] == sent.json()["reply"] and t["trace"] == sent.json()["trace"]
         assert t["correlation_id"] == sent.headers["X-Correlation-ID"]
     assert [t["text"] for t in listed] == [
-        "minhas faturas",
+        "my bills",
         persona_creds_text(personas[0]),
     ]
     # Trace is metadata only: no tool arguments or outputs (no CPF, no customer data).

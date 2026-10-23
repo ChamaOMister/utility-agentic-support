@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import date
 
 import httpx
 import pytest
@@ -176,7 +175,7 @@ def make_core(db, settings, billing_client):
 @pytest.fixture
 async def verified_turn(db, verified_conversation):
     """``verified_conversation`` (customer_ref cus_a) with its user item written."""
-    await start_turn(db, verified_conversation, "quais as minhas faturas em aberto?")
+    await start_turn(db, verified_conversation, "which of my bills are open?")
     return verified_conversation
 
 
@@ -257,8 +256,9 @@ async def test_billing_errors_give_recoverable_message_no_fabrication(
     make_core, db, claimed_conversation, billing_mock, personas
 ):
     p = personas[0]
-    birth = date.fromisoformat(p["birth_date"]).strftime("%d/%m/%Y")
-    user_text = f"CPF {p['cpf']}, nasci em {birth}, telefone final {p['phone'][-4:]}"
+    user_text = (
+        f"CPF {p['cpf']}, born {p['birth_date']}, phone ending {p['phone'][-4:]}"
+    )
     await start_turn(db, claimed_conversation, user_text)
     billing_mock.post("/v1/identity/verify").mock(return_value=httpx.Response(500))
     outcome = await handle(
@@ -527,7 +527,7 @@ async def test_history_and_instructions_reach_the_model(make_core, db, verified_
     request = fake.requests[0]
     assert "Vértice Energia" in request.instructions
     assert request.input[0] == msg("user", "antigo")
-    assert request.input[-1] == msg("user", "quais as minhas faturas em aberto?")
+    assert request.input[-1] == msg("user", "which of my bills are open?")
     assert {t["name"] for t in request.tools} >= {"authenticate_customer", "list_bills"}
     kinds = [m["kind"] for m in outcome.trace["model_calls"]]
     assert kinds == ["token_count", "generation"]

@@ -5,7 +5,7 @@ import { send, lastReply } from './helpers.js';
 // Reloading while a real turn is in progress (final review I2). A persona-scoped list_bills
 // `timeout` fault on the Compose mock billing keeps the server turn in progress for ~8 s.
 const E = JSON.parse(readFileSync(new URL('../../data/synthetic/personas.json', import.meta.url)))[4];
-const credentials = p => `${p.cpf}, ${p.birth_date.split('-').reverse().join('/')}, telefone ${p.phone.slice(-4)}`;
+const credentials = p => `${p.cpf}, born ${p.birth_date}, phone ${p.phone.slice(-4)}`;
 const billing = 'http://127.0.0.1:8001';
 
 function faultHeaders() {
@@ -25,7 +25,7 @@ async function reloadMidTurn(page, request) {
   test.setTimeout(60000);
   const health = await (await request.get('/api/health')).json();
   await page.goto('/');
-  await send(page, 'Quero ver minhas faturas');
+  await send(page, 'I want to see my bills');
   await send(page, credentials(E));
   await expect(lastReply(page)).toContainText('R$');
   const put = await request.put(`${billing}/_dev/faults`, {headers: faultHeaders(),
@@ -49,15 +49,15 @@ async function reloadMidTurn(page, request) {
     await original; // A recovery request reaches the API only after the original turn ends.
     return route.continue();
   });
-  await page.getByLabel('Sua mensagem').fill('Minhas faturas');
-  await page.getByRole('button', {name: 'Enviar mensagem', exact: true}).click();
+  await page.getByLabel('Your message').fill('My bills');
+  await page.getByRole('button', {name: 'Send message', exact: true}).click();
   await routed;
   const cid = await page.evaluate(() => localStorage.getItem('vertice-conversation-id'));
   await expect.poll(async () => (await (await page.request.get(`/api/conversations/${cid}`)).json()).turns.at(-1).status)
     .toBe('in_progress');
   await page.reload();
   await expect(page.getByTestId('user-message')).toHaveCount(3);
-  await expect(page.getByTestId('user-message').last()).toHaveText('Minhas faturas');
+  await expect(page.getByTestId('user-message').last()).toHaveText('My bills');
   await expect(page.getByTestId('pending-reply')).toHaveText(health.ui.sending);
   await expect(page.getByRole('button', {name: health.ui.retry, exact: true})).toBeVisible();
   return {health, posts};

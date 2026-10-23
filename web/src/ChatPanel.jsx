@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import VerifyIdentity from './VerifyIdentity';
 
 export default function ChatPanel({ui, turns, busy, ready, submit, retry}) {
   const [text, setText] = useState('');
@@ -39,5 +40,6 @@ export default function ChatPanel({ui, turns, busy, ready, submit, retry}) {
         <button type="submit" disabled={!ready || busy || !text.trim() || length > 2000} aria-label={ui.send}><span>{ui.send}</span><span aria-hidden="true">↗</span></button></div>
       <div className="composer-hint"><p id="message-hint">{length > 2000 ? ui.too_long : ui.message_hint}</p><span aria-hidden="true">{length}/2000</span></div>
     </form>
+    <VerifyIdentity ui={ui} disabled={!ready || busy} submit={submit} />
   </section>;
 }

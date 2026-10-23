@@ -133,7 +133,7 @@ def turn_markers(body):
 @pytest.fixture
 def short_prompt(tmp_path):
     path = tmp_path / "system.txt"
-    path.write_text("Responda em português.")
+    path.write_text("Reply in English.")
     return path
 
 

@@ -843,13 +843,14 @@ def persona_hash(persona: dict) -> str:
 
 
 def persona_creds_text(persona: dict) -> str:
-    """A PT-BR message carrying ``persona``'s credentials, as a customer would type it."""
+    """A message carrying ``persona``'s credentials, as a customer would type it."""
+    from support_api.agent.format_en import MONTHS
+
     cpf = persona["cpf"]
-    y, m, d = persona["birth_date"].split("-")
+    y, m, d = (int(part) for part in persona["birth_date"].split("-"))
     formatted = f"{cpf[:3]}.{cpf[3:6]}.{cpf[6:9]}-{cpf[9:]}"
-    return (
-        f"CPF {formatted}, nasci em {d}/{m}/{y}, telefone final {persona['phone'][-4:]}"
-    )
+    born = f"{d} {MONTHS[m - 1]} {y}"
+    return f"CPF {formatted}, born {born}, phone ending {persona['phone'][-4:]}"
 
 
 def fake_call(call_id: str, name: str, args: dict | None = None):
