@@ -39,7 +39,7 @@ UI_MESSAGES: dict[str, str] = {
     "loading": "Getting your support session ready…",
     "demo_heading": "Demo data",
     "synthetic": "synthetic data",
-    "demo_intro": "Pick a profile below to try a lookup. When asked, use “Verify my identity” or type the CPF, date of birth and last 4 phone digits.",
+    "demo_intro": "Pick a profile below and press “Fill verify form”, then Verify. You can also type the CPF, date of birth and last 4 phone digits in the chat.",
     "demo_unavailable": "The demo data is unavailable right now.",
     "cpf": "CPF",
     "account": "Account",
@@ -59,5 +59,7 @@ UI_MESSAGES: dict[str, str] = {
     "verify_phone_error": "Enter exactly 4 digits.",
     "verify_submit": "Verify",
     "verify_cancel": "Cancel",
+    "fill_verify": "Fill verify form",
+    "fill_verify_label": "Fill the verify form with {name}'s details",
     "verify_message": "My CPF or account number is {identifier}, my date of birth is {birth_date} and the last 4 digits of my phone are {phone_last4}.",
 }

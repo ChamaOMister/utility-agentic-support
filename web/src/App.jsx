@@ -3,7 +3,7 @@ import { ApiError, createConversation, getConversation, getDemoCustomers, getHea
 import fallback from './ui-text.json';
 import ChatPanel from './ChatPanel';
 import DebugDrawer from './DebugDrawer';
-import DemoDataPanel from './DemoDataPanel';
+import DemoDataPanel, { formatCPF } from './DemoDataPanel';
 const conversationKey = 'vertice-conversation-id';
 function storedConversation() { try {return localStorage.getItem(conversationKey);} catch {return null;} }
 function remember(id) { try {localStorage.setItem(conversationKey, id);} catch {/* In-memory conversations still work. */} }
@@ -25,6 +25,10 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
+  // A demo profile's details for the verify form; `filled` makes each button press a new value.
+  const [prefill, setPrefill] = useState(null);
+  const fill = person => setPrefill({identifier: formatCPF(person.cpf), birthDate: person.birth_date,
+    phone: person.phone_last4, filled: Date.now()});
   const sending = useRef(false);
   async function initialize() {
     setLoading(true); setError(false);
@@ -86,8 +90,8 @@ export default function App() {
     </section>
     {loading && <p className="connection-status" role="status">{ui.loading}</p>}
     {error && <div className="connection-error" role="alert"><p>{ui.network_error}</p><button type="button" onClick={initialize}>{ui.retry}</button></div>}
-    <div className="workspace"><div className="chat-column"><ChatPanel ui={ui} turns={turns} busy={busy} ready={!loading && !error && Boolean(conversationId)} submit={submit} retry={turn => submit(turn.text, turn)} /><DebugDrawer turns={turns} /></div>
-      <DemoDataPanel ui={ui} customers={customers} /></div>
+    <div className="workspace"><div className="chat-column"><ChatPanel ui={ui} turns={turns} busy={busy} ready={!loading && !error && Boolean(conversationId)} submit={submit} retry={turn => submit(turn.text, turn)} prefill={prefill} /><DebugDrawer turns={turns} /></div>
+      <DemoDataPanel ui={ui} customers={customers} fill={fill} /></div>
     </main><footer className="site-footer">{ui.footer}</footer>
   </div>;
 }

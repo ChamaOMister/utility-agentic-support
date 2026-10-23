@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 // The local calendar day as YYYY-MM-DD, the value format of <input type="date">.
 const today = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 const minBirthDate = '1900-01-01';
@@ -12,10 +12,25 @@ export function checkIdentity({identifier, birthDate, phone}) {
   };
 }
 const empty = {identifier: '', birthDate: '', phone: ''};
-export default function VerifyIdentity({ui, disabled, submit}) {
+export default function VerifyIdentity({ui, disabled, submit, prefill}) {
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState(empty);
   const [checked, setChecked] = useState(false);
+  const verifyButton = useRef(null);
+  const focusVerify = useRef(false);
+  // A demo profile was picked: open the form with its details and leave the click on Verify.
+  useEffect(() => {
+    if (!prefill) return;
+    const {identifier, birthDate, phone} = prefill;
+    setValues({identifier, birthDate, phone}); setChecked(false); setOpen(true);
+    focusVerify.current = true;
+  }, [prefill]);
+  useEffect(() => {
+    if (!open || !focusVerify.current) return;
+    focusVerify.current = false;
+    verifyButton.current?.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+    verifyButton.current?.focus({preventScroll: true});
+  }, [open, prefill]);
   const valid = checkIdentity(values);
   const set = key => event => setValues(previous => ({...previous, [key]: event.target.value}));
   function close() { setOpen(false); setValues(empty); setChecked(false); }
@@ -46,7 +61,7 @@ export default function VerifyIdentity({ui, disabled, submit}) {
       <input type="text" inputMode="numeric" maxLength={4} autoComplete="off" />)}
     <div className="verify-actions">
       <button type="button" className="verify-cancel" onClick={close}>{ui.verify_cancel}</button>
-      <button type="submit" disabled={disabled}>{ui.verify_submit}</button>
+      <button type="submit" ref={verifyButton} disabled={disabled}>{ui.verify_submit}</button>
     </div>
   </form>;
 }

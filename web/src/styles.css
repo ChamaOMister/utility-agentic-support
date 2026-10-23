@@ -415,6 +415,16 @@ textarea:disabled {
   margin:0 0 1rem;
   padding:0 0 0 2.3rem;
 }
+.persona-fill {
+  margin:0 0 .9rem 2.3rem;
+  padding:.4rem .75rem;
+  font-size:.7rem;
+  background:#e3eee8;
+  color:#176345;
+}
+.persona-fill:hover {
+  background:#d3e5da;
+}
 .persona dl div {
   display:flex;
   justify-content:space-between;
